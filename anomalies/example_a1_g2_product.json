@@ -1,0 +1,37 @@
+{
+  "gauge_groups": [
+    {
+      "id": "su2",
+      "algebra": "A1"
+    },
+    {
+      "id": "g2",
+      "algebra": "G2"
+    }
+  ],
+  "hypermultiplets": [
+    {
+      "name": "(2, 7)",
+      "representations": {
+        "su2": "fundamental",
+        "g2": "fundamental"
+      },
+      "kind": "half"
+    },
+    {
+      "name": "(2, 1)",
+      "representations": {
+        "su2": "fundamental"
+      },
+      "kind": "half"
+    },
+    {
+      "name": "(1, 7)",
+      "representations": {
+        "g2": "fundamental"
+      },
+      "number": 3,
+      "kind": "full"
+    }
+  ]
+}

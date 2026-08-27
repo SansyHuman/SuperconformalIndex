@@ -1,0 +1,15 @@
+{
+  "algebra": "A4",
+  "hypermultiplets": [
+    {
+      "representation": "symmetric",
+      "number": 1,
+      "kind": "full"
+    },
+    {
+      "representation": "antisymmetric",
+      "number": 1,
+      "kind": "full"
+    }
+  ]
+}

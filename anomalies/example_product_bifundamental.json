@@ -1,0 +1,23 @@
+{
+  "gauge_groups": [
+    {
+      "id": "left",
+      "algebra": "A1"
+    },
+    {
+      "id": "right",
+      "algebra": "A1"
+    }
+  ],
+  "hypermultiplets": [
+    {
+      "name": "bifundamental",
+      "representations": {
+        "left": "fundamental",
+        "right": "fundamental"
+      },
+      "number": 2,
+      "kind": "full"
+    }
+  ]
+}
