@@ -1,3 +1,4 @@
+from decimal import Decimal
 import json
 import os
 from pathlib import Path
@@ -81,6 +82,19 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
         self.assertIn("AUTO_INCREMENT", database.SCHEMA_SQL)
         self.assertIn("ENGINE=InnoDB", database.SCHEMA_SQL)
         self.assertIn("input_json JSON NOT NULL", database.SCHEMA_SQL)
+        self.assertIn(
+            "central_charge_a_decimal DECIMAL(65, 30)",
+            database.SCHEMA_SQL,
+        )
+        self.assertIn(
+            "central_charge_c_decimal DECIMAL(65, 30)",
+            database.SCHEMA_SQL,
+        )
+        self.assertIn("GENERATED ALWAYS AS", database.SCHEMA_SQL)
+        self.assertIn(
+            "idx_theory_properties_central_charge_a",
+            database.SCHEMA_SQL,
+        )
         self.assertNotIn("AUTOINCREMENT", database.SCHEMA_SQL)
         self.assertNotIn("CREATE INDEX IF NOT EXISTS", database.SCHEMA_SQL)
 
@@ -102,6 +116,33 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
                 for statement in statements
             )
         )
+        metadata_parameters = next(
+            parameters
+            for statement, parameters in connection.statements
+            if "INSERT INTO schema_metadata" in statement
+        )
+        self.assertEqual(metadata_parameters, ("schema_version", "2"))
+
+    def test_initialize_database_migrates_version_one_schema(self):
+        connection = _RecordingConnection(
+            select_rows=[{"metadata_value": "1"}]
+        )
+
+        database.initialize_database(connection)
+
+        migration = next(
+            statement
+            for statement, _ in connection.statements
+            if statement.startswith("ALTER TABLE theory_properties")
+        )
+        self.assertIn("central_charge_a_decimal", migration)
+        self.assertIn("central_charge_c_decimal", migration)
+        metadata_parameters = next(
+            parameters
+            for statement, parameters in connection.statements
+            if statement.startswith("UPDATE schema_metadata")
+        )
+        self.assertEqual(metadata_parameters, ("2", "schema_version"))
 
     def test_connect_database_uses_pymysql_options(self):
         connection = MagicMock()
@@ -209,7 +250,12 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
     def test_existing_mysql_json_properties_compare_structurally(self):
         _, properties = database._checked_results(E6_SCFT)
         stored_json = json.dumps(
-            database._shared_properties(properties), indent=2
+            json.loads(
+                database._json_text(
+                    database._shared_properties(properties), canonical=True
+                )
+            ),
+            indent=2,
         )
         connection = _RecordingConnection(
             select_rows=[{"properties_json": stored_json}]
@@ -221,6 +267,28 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
 
         self.assertEqual(len(connection.statements), 1)
         self.assertTrue(connection.statements[0][0].startswith("SELECT"))
+
+    def test_shared_properties_store_exact_central_charge_fractions(self):
+        _, properties = database._checked_results(E6_SCFT)
+        connection = _RecordingConnection()
+
+        database._insert_shared_properties(
+            connection, theory_id=3, properties=properties
+        )
+
+        _, parameters = next(
+            item
+            for item in connection.statements
+            if item[0].startswith("INSERT INTO theory_properties")
+        )
+        expected = {
+            "a": {"numerator": 83, "denominator": 4},
+            "c": {"numerator": 22, "denominator": 1},
+        }
+        self.assertEqual(json.loads(parameters[5]), expected)
+        self.assertEqual(
+            json.loads(parameters[8])["central_charges"], expected
+        )
 
     def test_store_commits_successful_transaction(self):
         connection = MagicMock()
@@ -338,13 +406,19 @@ class TheoryDatabaseMySQLIntegrationTests(unittest.TestCase):
             SELECT
                 t.name,
                 p.flavor_symmetry,
-                p.conformal_manifold_dimension
+                p.conformal_manifold_dimension,
+                p.central_charges_json,
+                p.central_charge_a_decimal,
+                p.central_charge_c_decimal
             FROM theories AS t
             JOIN theory_properties AS p ON p.theory_id = t.id
             WHERE t.id = %s
             """,
             (stored.theory_id,),
         )
+        central_charges = json.loads(row.pop("central_charges_json"))
+        a_decimal = row.pop("central_charge_a_decimal")
+        c_decimal = row.pop("central_charge_c_decimal")
         self.assertEqual(
             row,
             {
@@ -353,6 +427,15 @@ class TheoryDatabaseMySQLIntegrationTests(unittest.TestCase):
                 "conformal_manifold_dimension": 1,
             },
         )
+        self.assertEqual(
+            central_charges,
+            {
+                "a": {"numerator": 83, "denominator": 4},
+                "c": {"numerator": 22, "denominator": 1},
+            },
+        )
+        self.assertEqual(a_decimal, Decimal("20.75"))
+        self.assertEqual(c_decimal, Decimal("22"))
 
     def test_file_api_writes_existing_json_to_mysql(self):
         input_path = PROJECT_ROOT / "anomalies" / "example_e6.json"

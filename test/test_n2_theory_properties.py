@@ -1,3 +1,7 @@
+from contextlib import redirect_stdout
+from fractions import Fraction
+from io import StringIO
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -24,6 +28,10 @@ class TheoryPropertyTests(unittest.TestCase):
         self.assertEqual(result["flavor_symmetry"]["connected_group"], "U(6)")
         self.assertEqual(result["flavor_symmetry"]["dimension"], 36)
         self.assertEqual(result["conformal_manifold_dimension"], 1)
+        self.assertEqual(
+            result["central_charges"],
+            {"a": Fraction(29, 12), "c": Fraction(17, 6)},
+        )
 
     def test_real_bifundamentals_have_symplectic_flavor(self):
         result = properties.calculate_n2_theory_properties(
@@ -51,6 +59,10 @@ class TheoryPropertyTests(unittest.TestCase):
         self.assertEqual(
             result["exactly_marginal_gauge_couplings"], ["left", "right"]
         )
+        self.assertEqual(
+            result["central_charges"],
+            {"a": Fraction(19, 12), "c": Fraction(5, 3)},
+        )
 
     def test_pseudoreal_product_counts_half_hyper_units(self):
         result = properties.calculate_n2_theory_properties(
@@ -75,6 +87,7 @@ class TheoryPropertyTests(unittest.TestCase):
         self.assertEqual(result["flavor_symmetry"]["connected_group"], "SO(2)")
         self.assertEqual(factor["half_hyper_units"], 2)
         self.assertIsNone(result["conformal_manifold_dimension"])
+        self.assertIsNone(result["central_charges"])
 
     def test_single_trifundamental_has_no_continuous_flavor(self):
         result = properties.calculate_n2_theory_properties(
@@ -103,6 +116,46 @@ class TheoryPropertyTests(unittest.TestCase):
         result = properties.calculate_n2_theory_properties_from_file(path)
         self.assertEqual(result["flavor_symmetry"]["connected_group"], "U(4)")
         self.assertEqual(result["conformal_manifold_dimension"], 1)
+        self.assertEqual(
+            result["central_charges"],
+            {"a": Fraction(83, 4), "c": Fraction(22)},
+        )
+
+    def test_main_serializes_central_charges_exactly(self):
+        path = PROJECT_ROOT / "anomalies" / "example_e6.json"
+        output = StringIO()
+
+        with redirect_stdout(output):
+            exit_code = properties.main([str(path)])
+
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(
+            result["central_charges"],
+            {
+                "a": {"numerator": 83, "denominator": 4},
+                "c": {"numerator": 22, "denominator": 1},
+            },
+        )
+
+    def test_public_central_charge_api_counts_half_hypers(self):
+        central_charges = properties.calculate_central_charges(
+            {
+                "algebra": "A1",
+                "hypermultiplets": [
+                    {
+                        "representation": "fundamental",
+                        "kind": "half",
+                        "number": 8,
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(
+            central_charges,
+            {"a": Fraction(23, 24), "c": Fraction(7, 6)},
+        )
 
     def test_invalid_hyper_input_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "invalid theory input"):
@@ -117,7 +170,6 @@ class TheoryPropertyTests(unittest.TestCase):
 
     def test_deferred_properties_raise_not_implemented(self):
         for function in (
-            properties.calculate_central_charges,
             properties.calculate_coulomb_branch_spectrum,
             properties.calculate_superconformal_indices,
         ):

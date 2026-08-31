@@ -3,27 +3,39 @@
 
 The input JSON schema is the same one accepted by
 ``anomalies.check_n2_anomalies``. The implemented properties are the connected
-continuous flavor symmetry at the massless point and the local complex
-dimension of the conformal manifold. Central charges, the Coulomb-branch
-spectrum, and superconformal indices are reserved for later integration.
+continuous flavor symmetry at the massless point, the local complex dimension
+of the conformal manifold, and the conformal central charges. The Coulomb-
+branch spectrum and superconformal indices are reserved for later integration.
 """
 
 from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+from fractions import Fraction
 import json
 from pathlib import Path
 import sys
 from typing import Any
+
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from anomalies.check_n2_anomalies import (
     HyperData,
     ProductHyperData,
     check_input_data,
 )
-from anomalies.lie_algebra import DynkinLabels, conjugate_dynkin_labels
+from anomalies.lie_algebra import (
+    DynkinLabels,
+    conjugate_dynkin_labels,
+    get_lie_algebra,
+)
 
+if __package__:
+    from .json_utils import json_text
+else:
+    from common.json_utils import json_text
 
 RepresentationKey = tuple[tuple[str, DynkinLabels], ...]
 
@@ -236,17 +248,66 @@ def _exactly_marginal_gauge_couplings(
     return ["gauge"]
 
 
-def calculate_n2_theory_properties(data: dict[str, Any]) -> dict[str, Any]:
-    """Calculate implemented properties from an anomaly-checker JSON object."""
+def _calculate_central_charges(
+    anomaly_result: dict[str, Any],
+) -> dict[str, Fraction]:
+    """Calculate the conformal central charges from effective multiplets."""
+    if "gauge_factors" in anomaly_result:
+        n_v = 0
+        for factor in anomaly_result["gauge_factors"]:
+            n_v += get_lie_algebra(factor["algebra"]).dimension
+        n_h = Fraction(0)
+        for hyper in anomaly_result["hypermultiplets"]:
+            e_i = Fraction(1) if hyper.kind == "full" else Fraction(1, 2)
+            n_h += hyper.number * e_i * hyper.dimension
+    else:
+        n_v = get_lie_algebra(anomaly_result["algebra"]).dimension
+        n_h = Fraction(0)
+        for hyper in anomaly_result["hypermultiplets"]:
+            e_i = Fraction(1) if hyper.kind == "full" else Fraction(1, 2)
+            n_h += hyper.number * e_i * hyper.representation.dimension
+
+    a = Fraction(5, 24) * n_v + Fraction(1, 24) * n_h
+    c = Fraction(1, 6) * n_v + Fraction(1, 12) * n_h
+
+    if a <= 0 or c <= 0:
+        raise ValueError("Central charges must be positive.")
+
+    if 4 * (2 * a - c) != n_v:
+        raise ArithmeticError(
+            "Central-charge and vector-multiplet counts disagree."
+        )
+
+    if 4 * (5 * c - 4 * a) != n_h:
+        raise ArithmeticError(
+            "Central-charge and hypermultiplet counts disagree."
+        )
+
+    return {"a": a, "c": c}
+
+
+def _validated_anomaly_result(data: dict[str, Any]) -> dict[str, Any]:
+    """Check the input and return its parsed anomaly result."""
     anomaly_result = check_input_data(data)
     if anomaly_result["errors"]:
         messages = "; ".join(anomaly_result["errors"])
         raise ValueError(f"invalid theory input: {messages}")
+    return anomaly_result
+
+
+def calculate_n2_theory_properties(data: dict[str, Any]) -> dict[str, Any]:
+    """Calculate implemented properties from an anomaly-checker JSON object."""
+    anomaly_result = _validated_anomaly_result(data)
 
     flavor_symmetry = _calculate_flavor_symmetry(anomaly_result)
     marginal_couplings = _exactly_marginal_gauge_couplings(anomaly_result)
     conformal_dimension = (
         len(marginal_couplings)
+        if anomaly_result["lagrangian_scft_candidate"]
+        else None
+    )
+    central_charges = (
+        _calculate_central_charges(anomaly_result)
         if anomaly_result["lagrangian_scft_candidate"]
         else None
     )
@@ -258,7 +319,7 @@ def calculate_n2_theory_properties(data: dict[str, Any]) -> dict[str, Any]:
         "flavor_symmetry": flavor_symmetry,
         "conformal_manifold_dimension": conformal_dimension,
         "exactly_marginal_gauge_couplings": marginal_couplings,
-        "central_charges": None,
+        "central_charges": central_charges,
         "coulomb_branch_spectrum": None,
         "superconformal_indices": None,
     }
@@ -273,8 +334,14 @@ def calculate_n2_theory_properties_from_file(
     return calculate_n2_theory_properties(data)
 
 
-def calculate_central_charges(data: dict[str, Any]) -> Any:
-    raise NotImplementedError("central charges are not implemented in this module")
+def calculate_central_charges(
+    data: dict[str, Any],
+) -> dict[str, Fraction] | None:
+    """Calculate central charges for a Lagrangian SCFT candidate."""
+    anomaly_result = _validated_anomaly_result(data)
+    if not anomaly_result["lagrangian_scft_candidate"]:
+        return None
+    return _calculate_central_charges(anomaly_result)
 
 
 def calculate_coulomb_branch_spectrum(data: dict[str, Any]) -> Any:
@@ -298,7 +365,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, json.JSONDecodeError, ValueError, ArithmeticError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(result, indent=2))
+    print(json_text(result, indent=2))
     return 0
 
 

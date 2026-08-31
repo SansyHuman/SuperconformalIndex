@@ -14,7 +14,7 @@ theory later.
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass
 from fractions import Fraction
 import hashlib
 import json
@@ -28,9 +28,17 @@ from pymysql.connections import Connection
 from pymysql.cursors import DictCursor
 
 if __package__:
+    from .json_utils import (
+        json_text as _json_text,
+        optional_json_text as _optional_json_text,
+    )
     from .n2_theory_properties import calculate_n2_theory_properties
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from common.json_utils import (
+        json_text as _json_text,
+        optional_json_text as _optional_json_text,
+    )
     from common.n2_theory_properties import calculate_n2_theory_properties
 
 from anomalies.check_n2_anomalies import (
@@ -41,7 +49,7 @@ from anomalies.check_n2_anomalies import (
 from anomalies.lie_algebra import conjugate_dynkin_labels
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -67,10 +75,60 @@ CREATE TABLE IF NOT EXISTS theory_properties (
     flavor_dimension BIGINT UNSIGNED NOT NULL,
     conformal_manifold_dimension INT UNSIGNED NULL,
     central_charges_json JSON NULL,
+    central_charge_a_decimal DECIMAL(65, 30)
+        GENERATED ALWAYS AS (
+            CAST(
+                JSON_UNQUOTE(
+                    JSON_EXTRACT(
+                        central_charges_json,
+                        '$.a.numerator'
+                    )
+                ) AS DECIMAL(65, 30)
+            )
+            / NULLIF(
+                CAST(
+                    JSON_UNQUOTE(
+                        JSON_EXTRACT(
+                            central_charges_json,
+                            '$.a.denominator'
+                        )
+                    ) AS DECIMAL(65, 30)
+                ),
+                0
+            )
+        ) STORED,
+    central_charge_c_decimal DECIMAL(65, 30)
+        GENERATED ALWAYS AS (
+            CAST(
+                JSON_UNQUOTE(
+                    JSON_EXTRACT(
+                        central_charges_json,
+                        '$.c.numerator'
+                    )
+                ) AS DECIMAL(65, 30)
+            )
+            / NULLIF(
+                CAST(
+                    JSON_UNQUOTE(
+                        JSON_EXTRACT(
+                            central_charges_json,
+                            '$.c.denominator'
+                        )
+                    ) AS DECIMAL(65, 30)
+                ),
+                0
+            )
+        ) STORED,
     coulomb_branch_spectrum_json JSON NULL,
     superconformal_indices_json JSON NULL,
     properties_json JSON NOT NULL,
     PRIMARY KEY (theory_id),
+    KEY idx_theory_properties_central_charge_a (
+        central_charge_a_decimal
+    ),
+    KEY idx_theory_properties_central_charge_c (
+        central_charge_c_decimal
+    ),
     CONSTRAINT fk_theory_properties_theory
         FOREIGN KEY (theory_id) REFERENCES theories(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -209,6 +267,65 @@ CREATE TABLE IF NOT EXISTS exactly_marginal_couplings (
 """
 
 
+SCHEMA_MIGRATIONS = {
+    1: (
+        """
+        ALTER TABLE theory_properties
+            ADD COLUMN central_charge_a_decimal DECIMAL(65, 30)
+                GENERATED ALWAYS AS (
+                    CAST(
+                        JSON_UNQUOTE(
+                            JSON_EXTRACT(
+                                central_charges_json,
+                                '$.a.numerator'
+                            )
+                        ) AS DECIMAL(65, 30)
+                    )
+                    / NULLIF(
+                        CAST(
+                            JSON_UNQUOTE(
+                                JSON_EXTRACT(
+                                    central_charges_json,
+                                    '$.a.denominator'
+                                )
+                            ) AS DECIMAL(65, 30)
+                        ),
+                        0
+                    )
+                ) STORED AFTER central_charges_json,
+            ADD COLUMN central_charge_c_decimal DECIMAL(65, 30)
+                GENERATED ALWAYS AS (
+                    CAST(
+                        JSON_UNQUOTE(
+                            JSON_EXTRACT(
+                                central_charges_json,
+                                '$.c.numerator'
+                            )
+                        ) AS DECIMAL(65, 30)
+                    )
+                    / NULLIF(
+                        CAST(
+                            JSON_UNQUOTE(
+                                JSON_EXTRACT(
+                                    central_charges_json,
+                                    '$.c.denominator'
+                                )
+                            ) AS DECIMAL(65, 30)
+                        ),
+                        0
+                    )
+                ) STORED AFTER central_charge_a_decimal,
+            ADD KEY idx_theory_properties_central_charge_a (
+                central_charge_a_decimal
+            ),
+            ADD KEY idx_theory_properties_central_charge_c (
+                central_charge_c_decimal
+            )
+        """,
+    ),
+}
+
+
 class TheoryCheckError(ValueError):
     """Raised when an input is not a consistent conformal Lagrangian theory."""
 
@@ -254,7 +371,7 @@ def _insert(
 
 
 def initialize_database(connection: Connection) -> None:
-    """Create the version-one MySQL schema on an open connection."""
+    """Create or migrate the current MySQL schema on an open connection."""
     for statement in SCHEMA_SQL.split(";"):
         if statement.strip():
             _execute(connection, statement)
@@ -277,10 +394,32 @@ def initialize_database(connection: Connection) -> None:
             """,
             ("schema_version", str(SCHEMA_VERSION)),
         )
-    elif int(version["metadata_value"]) != SCHEMA_VERSION:
+        return
+
+    current_version = int(version["metadata_value"])
+    if current_version > SCHEMA_VERSION:
         raise RuntimeError(
             "unsupported database schema version "
             f"{version['metadata_value']}; expected {SCHEMA_VERSION}"
+        )
+
+    while current_version < SCHEMA_VERSION:
+        statements = SCHEMA_MIGRATIONS.get(current_version)
+        if statements is None:
+            raise RuntimeError(
+                f"no migration from database schema version {current_version}"
+            )
+        for statement in statements:
+            _execute(connection, statement)
+        current_version += 1
+        _execute(
+            connection,
+            """
+            UPDATE schema_metadata
+            SET metadata_value = %s
+            WHERE metadata_key = %s
+            """,
+            (str(current_version), "schema_version"),
         )
 
 
@@ -313,33 +452,6 @@ def connect_database(
         connection.close()
         raise
     return connection
-
-
-def _json_default(value: Any) -> Any:
-    if isinstance(value, Fraction):
-        return {
-            "numerator": value.numerator,
-            "denominator": value.denominator,
-        }
-    if is_dataclass(value) and not isinstance(value, type):
-        return asdict(value)
-    if isinstance(value, tuple):
-        return list(value)
-    raise TypeError(f"{type(value).__name__} is not JSON serializable")
-
-
-def _json_text(value: Any, *, canonical: bool = False) -> str:
-    return json.dumps(
-        value,
-        default=_json_default,
-        ensure_ascii=False,
-        sort_keys=canonical,
-        separators=(",", ":") if canonical else None,
-    )
-
-
-def _optional_json_text(value: Any) -> str | None:
-    return None if value is None else _json_text(value)
 
 
 def _fraction_parts(value: Fraction | int) -> tuple[int, int]:
@@ -511,6 +623,7 @@ def _insert_shared_properties(
 ) -> None:
     shared = _shared_properties(properties)
     serialized = _json_text(shared, canonical=True)
+    normalized_shared = json.loads(serialized)
     existing = _fetchone(
         connection,
         "SELECT properties_json FROM theory_properties WHERE theory_id = %s",
@@ -520,7 +633,7 @@ def _insert_shared_properties(
         existing_properties = existing["properties_json"]
         if isinstance(existing_properties, str):
             existing_properties = json.loads(existing_properties)
-        if existing_properties != shared:
+        if existing_properties != normalized_shared:
             raise ValueError(
                 f"theory {theory_id} already has different shared properties"
             )
