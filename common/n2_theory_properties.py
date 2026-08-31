@@ -41,6 +41,7 @@ class _FlavorBlock:
 def _canonical_complex_key(
     key: RepresentationKey, factor_algebras: dict[str, str]
 ) -> RepresentationKey:
+    """Select one of the original and conjugate representations."""
     conjugate_key = tuple(
         (
             factor_id,
@@ -59,6 +60,7 @@ def _add_flavor_block(
     number: int,
     factor_algebras: dict[str, str],
 ) -> None:
+    """Accumulate multiplicities for hypermultiplets."""
     if number == 0:
         return
     if reality == "complex":
@@ -82,6 +84,7 @@ def _add_flavor_block(
 def _simple_flavor_blocks(
     anomaly_result: dict[str, Any],
 ) -> tuple[dict[RepresentationKey, _FlavorBlock], dict[str, str]]:
+    """Group all hypers in simple gauge group with the same representation."""
     factor_id = "gauge"
     factor_algebras = {factor_id: anomaly_result["algebra"]}
     blocks: dict[RepresentationKey, _FlavorBlock] = {}
@@ -104,6 +107,7 @@ def _simple_flavor_blocks(
 def _product_flavor_blocks(
     anomaly_result: dict[str, Any],
 ) -> tuple[dict[RepresentationKey, _FlavorBlock], dict[str, str]]:
+    """Group all hypers in product gauge group with the same representation."""
     factors = anomaly_result["gauge_factors"]
     factor_ids = [factor["id"] for factor in factors]
     factor_algebras = {
@@ -131,6 +135,7 @@ def _product_flavor_blocks(
 def _representation_data(
     key: RepresentationKey, factor_algebras: dict[str, str]
 ) -> dict[str, dict[str, Any]]:
+    """Serialize the gauge representation associated with a flavor factor."""
     return {
         factor_id: {
             "algebra": factor_algebras[factor_id],
@@ -143,6 +148,7 @@ def _representation_data(
 def _flavor_factor(
     block: _FlavorBlock, factor_algebras: dict[str, str]
 ) -> dict[str, Any]:
+    """Calculate the flavor symmetry for a flavor block."""
     match block.reality:
         case "complex":
             if block.half_multiplicity:
@@ -197,6 +203,7 @@ def _flavor_factor(
 def _calculate_flavor_symmetry(
     anomaly_result: dict[str, Any],
 ) -> dict[str, Any]:
+    """Calculate the flavor symmetry of the theory."""
     if "gauge_factors" in anomaly_result:
         blocks, factor_algebras = _product_flavor_blocks(anomaly_result)
     else:
@@ -221,6 +228,7 @@ def _calculate_flavor_symmetry(
 def _exactly_marginal_gauge_couplings(
     anomaly_result: dict[str, Any],
 ) -> list[str]:
+    """Return exactly marginal gauge couplings."""
     if not anomaly_result["lagrangian_scft_candidate"]:
         return []
     if "gauge_factors" in anomaly_result:
@@ -235,6 +243,7 @@ def calculate_n2_theory_properties(data: dict[str, Any]) -> dict[str, Any]:
         messages = "; ".join(anomaly_result["errors"])
         raise ValueError(f"invalid theory input: {messages}")
 
+    flavor_symmetry = _calculate_flavor_symmetry(anomaly_result)
     marginal_couplings = _exactly_marginal_gauge_couplings(anomaly_result)
     conformal_dimension = (
         len(marginal_couplings)
@@ -246,7 +255,7 @@ def calculate_n2_theory_properties(data: dict[str, Any]) -> dict[str, Any]:
         "lagrangian_scft_candidate": anomaly_result[
             "lagrangian_scft_candidate"
         ],
-        "flavor_symmetry": _calculate_flavor_symmetry(anomaly_result),
+        "flavor_symmetry": flavor_symmetry,
         "conformal_manifold_dimension": conformal_dimension,
         "exactly_marginal_gauge_couplings": marginal_couplings,
         "central_charges": None,
