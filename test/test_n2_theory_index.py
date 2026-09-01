@@ -1,0 +1,358 @@
+import json
+from pathlib import Path
+import shutil
+import sys
+import tempfile
+import unittest
+
+
+PROJECT_ROOT = Path(__file__).parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+from index.char_decomposition_cache import CharacterDecompositionCache
+from index.n2_theory_index import (
+    _matter_character_multiplicities,
+    _parse_input,
+    calculate_index,
+)
+
+
+HAS_EXTERNAL_BACKEND = (
+    shutil.which("form") is not None and shutil.which("lie") is not None
+)
+
+
+@unittest.skipUnless(HAS_EXTERNAL_BACKEND, "FORM and LiE are required")
+class CharacterDecompositionCacheTests(unittest.TestCase):
+    def test_cache_uses_project_cartan_and_dynkin_filename_convention(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = CharacterDecompositionCache(directory)
+            decomposition = cache.get_decomposition("A1", (1,), (0, 1))
+
+            expected_path = (
+                Path(directory)
+                / "A1"
+                / "A1_dynkin_1_adams_order_2.json"
+            )
+            self.assertTrue(expected_path.is_file())
+            self.assertEqual(decomposition, {(0,): -1, (2,): 1})
+
+            with expected_path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            self.assertEqual(payload["algebra"], "A1")
+            self.assertEqual(payload["dynkin_labels"], [1])
+            self.assertEqual(payload["adams_order"], 2)
+
+            file_only = CharacterDecompositionCache(
+                directory, lie_executable="missing-lie-for-cache-test"
+            )
+            self.assertEqual(
+                file_only.get_decomposition("A1", (1,), (0, 1)),
+                decomposition,
+            )
+
+    def test_parallel_batch_preserves_entries_that_share_one_cache_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            requests = [
+                ("A1", (1,), (0, 3)),
+                ("A1", (1,), (1, 1, 1)),
+                ("A1", (1,), (2, 0, 0, 1)),
+            ]
+            sequential = CharacterDecompositionCache(
+                Path(directory) / "sequential", max_workers=1
+            ).get_decompositions(requests)
+            cache = CharacterDecompositionCache(
+                Path(directory) / "parallel", max_workers=3
+            )
+            parallel = cache.get_decompositions(requests)
+            self.assertEqual(parallel, sequential)
+
+            path = cache.cache_path("A1", (1,), 6)
+            with path.open("r", encoding="utf-8") as handle:
+                payload = json.load(handle)
+            self.assertEqual(
+                {tuple(entry["adams_powers"]) for entry in payload["decompositions"]},
+                {request[2] + (0,) * (6 - len(request[2])) for request in requests},
+            )
+
+            file_only = CharacterDecompositionCache(
+                Path(directory) / "parallel",
+                lie_executable="missing-lie-for-parallel-cache-test",
+                max_workers=3,
+            )
+            self.assertEqual(file_only.get_decompositions(requests), parallel)
+
+
+@unittest.skipUnless(HAS_EXTERNAL_BACKEND, "FORM and LiE are required")
+class N2TheoryIndexTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.temporary_directory = tempfile.TemporaryDirectory()
+        cls.cache_directory = cls.temporary_directory.name
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.temporary_directory.cleanup()
+
+    def test_su3_six_flavors_matches_reference_through_t6(self):
+        result = calculate_index(
+            {
+                "algebra": "A2",
+                "hypermultiplets": [
+                    {
+                        "representation": "fundamental",
+                        "number": 6,
+                        "kind": "full",
+                    }
+                ],
+            },
+            6,
+            cache_directory=self.cache_directory,
+        )
+        t = result.parent().gen()
+        y, u = result.parent().base_ring().gens()
+        expected = (
+            1
+            + (36 / u**2 + u**4) * t**4
+            - u**2 * (y + 1 / y) * t**5
+            + (40 / u**3 - 36 + u**6) * t**6
+        )
+        self.assertEqual(result, expected)
+
+    def test_named_and_explicit_dynkin_labels_agree(self):
+        named = {
+            "algebra": "A1",
+            "hypermultiplets": [
+                {"representation": "fundamental", "number": 4}
+            ],
+        }
+        labelled = {
+            "algebra": "A1",
+            "hypermultiplets": [
+                {"dynkin_labels": [1], "number": 4}
+            ],
+        }
+        self.assertEqual(
+            calculate_index(named, 6, cache_directory=self.cache_directory),
+            calculate_index(labelled, 6, cache_directory=self.cache_directory),
+        )
+
+    def test_product_bifundamental_matches_reference_through_t10(self):
+        result = calculate_index(
+            {
+                "gauge_groups": [
+                    {"id": "left", "algebra": "A1"},
+                    {"id": "right", "algebra": "A1"},
+                ],
+                "hypermultiplets": [
+                    {
+                        "representations": {
+                            "left": "fundamental",
+                            "right": "fundamental",
+                        },
+                        "number": 2,
+                        "kind": "full",
+                    }
+                ],
+            },
+            10,
+            cache_directory=self.cache_directory,
+        )
+        t = result.parent().gen()
+        y, u = result.parent().base_ring().gens()
+        expected = (
+            1
+            + (2 * u**4 + 10 / u**2) * t**4
+            - 2 * u**2 * (y + 1 / y) * t**5
+            - 4 * t**6
+            + (2 * u**4 + 6 / u**2) * (y + 1 / y) * t**7
+            + (
+                3 * u**8
+                - 2 * u**2 * (y**2 + y ** (-2) - 1)
+                + 44 / u**4
+            )
+            * t**8
+            - (4 * u**6 + 10) * (y + 1 / y) * t**9
+            + (
+                3 * u**4 * (y**2 + y ** (-2))
+                + (6 * (y**2 + y ** (-2)) - 52) / u**2
+            )
+            * t**10
+        )
+        self.assertEqual(result, expected)
+
+    def test_decoupled_product_equals_product_of_simple_indices(self):
+        left = {
+            "algebra": "A1",
+            "hypermultiplets": [
+                {"representation": "fundamental", "number": 4}
+            ],
+        }
+        right = {
+            "algebra": "A2",
+            "hypermultiplets": [
+                {"representation": "fundamental", "number": 6}
+            ],
+        }
+        product = {
+            "gauge_groups": [
+                {"id": "left", "algebra": "A1"},
+                {"id": "right", "algebra": "A2"},
+            ],
+            "hypermultiplets": [
+                {
+                    "representations": {"left": "fundamental"},
+                    "number": 4,
+                },
+                {
+                    "representations": {"right": "fundamental"},
+                    "number": 6,
+                },
+            ],
+        }
+        order = 6
+        actual = calculate_index(
+            product, order, cache_directory=self.cache_directory
+        )
+        independent = calculate_index(
+            left, order, cache_directory=self.cache_directory
+        ) * calculate_index(
+            right, order, cache_directory=self.cache_directory
+        )
+        t = actual.parent().gen()
+        expected = sum(
+            (
+                actual.parent()(independent[degree]) * t**degree
+                for degree in range(order + 1)
+            ),
+            actual.parent().zero(),
+        )
+        self.assertEqual(actual, expected)
+
+    def test_full_product_hyper_adds_only_representation_and_its_dual(self):
+        factors, hypers = _parse_input(
+            {
+                "gauge_groups": [
+                    {"id": "left", "algebra": "A2"},
+                    {"id": "right", "algebra": "A2"},
+                ],
+                "hypermultiplets": [
+                    {
+                        "representations": {
+                            "left": "fundamental",
+                            "right": "fundamental",
+                        },
+                        "kind": "full",
+                    }
+                ],
+            }
+        )
+        self.assertEqual(
+            _matter_character_multiplicities(factors, hypers),
+            {
+                ((0, (1, 0)), (1, (1, 0))): 1,
+                ((0, (0, 1)), (1, (0, 1))): 1,
+            },
+        )
+
+    def test_valid_product_half_hyper_is_supported(self):
+        result = calculate_index(
+            {
+                "gauge_groups": [
+                    {"id": "su2", "algebra": "A1"},
+                    {"id": "g2", "algebra": "G2"},
+                ],
+                "hypermultiplets": [
+                    {
+                        "representations": {
+                            "su2": "fundamental",
+                            "g2": "fundamental",
+                        },
+                        "kind": "half",
+                    }
+                ],
+            },
+            4,
+            cache_directory=self.cache_directory,
+        )
+        self.assertEqual(result[0], 1)
+
+    def test_three_factor_projection_is_independent_of_factor_order(self):
+        factor_ids = ("first", "second", "third")
+
+        def theory(order):
+            return {
+                "gauge_groups": [
+                    {"id": factor_id, "algebra": "A1"}
+                    for factor_id in order
+                ],
+                "hypermultiplets": [
+                    {
+                        "representations": {
+                            factor_id: "fundamental"
+                            for factor_id in factor_ids
+                        },
+                        "kind": "half",
+                    }
+                ],
+            }
+
+        self.assertEqual(
+            calculate_index(
+                theory(factor_ids),
+                6,
+                cache_directory=self.cache_directory,
+            ),
+            calculate_index(
+                theory(reversed(factor_ids)),
+                6,
+                cache_directory=self.cache_directory,
+            ),
+        )
+
+    def test_orders_below_first_letter_need_no_external_process(self):
+        data = {
+            "gauge_groups": [
+                {"id": "left", "algebra": "A1"},
+                {"id": "right", "algebra": "A1"},
+            ],
+            "hypermultiplets": [],
+        }
+        for order in (0, 1):
+            with self.subTest(order=order):
+                result = calculate_index(
+                    data,
+                    order,
+                    cache_directory=self.cache_directory,
+                    lie_executable="missing-lie-for-low-order-test",
+                    form_executable="missing-form-for-low-order-test",
+                )
+                self.assertEqual(result, 1)
+
+    def test_invalid_half_hyper_uses_existing_validation(self):
+        with self.assertRaisesRegex(ValueError, "pseudoreal"):
+            calculate_index(
+                {
+                    "algebra": "A2",
+                    "hypermultiplets": [
+                        {
+                            "representation": "fundamental",
+                            "kind": "half",
+                        }
+                    ],
+                },
+                4,
+                cache_directory=self.cache_directory,
+            )
+
+    def test_order_must_be_nonnegative(self):
+        with self.assertRaisesRegex(ValueError, "order"):
+            calculate_index(
+                {"algebra": "A1", "hypermultiplets": []},
+                -1,
+                cache_directory=self.cache_directory,
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()
