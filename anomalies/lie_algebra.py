@@ -27,6 +27,7 @@ except ImportError as exc:  # pragma: no cover - exercised only outside Sage
     ) from exc
 
 
+# Highest weight of the representation
 DynkinLabels = tuple[int, ...]
 
 

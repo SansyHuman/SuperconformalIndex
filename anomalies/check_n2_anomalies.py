@@ -98,26 +98,37 @@ else:  # Support direct execution: sage -python anomalies/check_n2_anomalies.py
 @dataclass(frozen=True)
 class RepresentationData:
     """Data of single representation."""
+    # Name of the representation
     name: str
+    # Dynkin labels of the representation
     labels: tuple[int, ...]
+    # Dimension of the representation
     dimension: int
+    # Dynkin index of the representation
     dynkin_index: Fraction
+    # Reality type; one of real, pseudoreal, and complex
     reality: str
 
 
 @dataclass(frozen=True)
 class HyperData:
     """Data of simple-factor hypermultiplet."""
+    # Representation of the hypermultiplet
     representation: RepresentationData
+    # Multiplicity of the multiplet
     number: int
+    # Full or half hypermultiplet
     kind: str
+    # Contribution to the beta function
     beta_contribution: Fraction
 
 
 @dataclass(frozen=True)
 class GaugeFactorData:
     """Simple object for each gauge groups of product group."""
+    # Identifier of the gauge group
     factor_id: str
+    # Gauge group algebra
     algebra: SimpleLieAlgebra
 
     @property
@@ -128,12 +139,19 @@ class GaugeFactorData:
 @dataclass(frozen=True)
 class ProductHyperData:
     """Data of hypermultiplet in product of representations."""
+    # Name of the hypermultiplet
     name: str
+    # Product of representations with each gauge factor
     representations: dict[str, RepresentationData]
+    # Dimension of representation
     dimension: int
+    # Reality type of the representation
     reality: str
+    # Multiplicity of the multiplet
     number: int
+    # Full or half hypermultiplet
     kind: str
+    # Contribution to beta functions of each gauge factor
     beta_contributions: dict[str, Fraction]
 
 

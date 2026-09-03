@@ -1,0 +1,10 @@
+{
+  "algebra": "A1",
+  "hypermultiplets": [
+    {
+      "representation": "fundamental",
+      "number": 8,
+      "kind": "half"
+    }
+  ]
+}

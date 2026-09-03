@@ -48,8 +48,11 @@ from index.char_decomposition_cache import (
 )
 
 
+# A pair (gauge factor position, highest weight of representation)
 CharacterSpec = tuple[int, DynkinLabels]
+# Character of external tensor product representations
 CharacterMonomial = tuple[CharacterSpec, ...]
+# Character monomial after every character has been assigned a FORM character number
 IndexedMonomial = tuple[int, ...]
 
 
@@ -57,10 +60,15 @@ IndexedMonomial = tuple[int, ...]
 class FormTerm:
     """One FORM monomial before gauge-singlet projection."""
 
+    # Coefficient of the term
     coefficient: Fraction
+    # Power of t
     t_power: int
+    # Power of y fugacity
     y_power: int
+    # Power of u fugacity
     u_power: int
+    # products of characters with (character index, Adams powers of the character)
     characters: tuple[tuple[int, AdamsPowers], ...]
 
 
@@ -305,6 +313,7 @@ def _split_signed_terms(expression: str) -> list[str]:
 
 
 def _canonical_character_powers(raw: dict[int, int]) -> AdamsPowers:
+    """Convert a mapping from Adams operation index to power to one formal character."""
     order = sum(adams * exponent for adams, exponent in raw.items())
     return tuple(raw.get(adams, 0) for adams in range(1, order + 1))
 
@@ -449,6 +458,7 @@ def _project_terms(
 def _to_sage_polynomial(
     projected: dict[tuple[int, int, int], Fraction]
 ) -> Any:
+    """Convert the projected dictionary to sage polynomial."""
     coefficient_ring = LaurentPolynomialRing(QQ, 2, names=("y", "u"))
     y, u = coefficient_ring.gens()
     index_ring = PolynomialRing(coefficient_ring, "t")

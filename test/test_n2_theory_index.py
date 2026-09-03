@@ -9,7 +9,10 @@ import unittest
 PROJECT_ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from index.char_decomposition_cache import CharacterDecompositionCache
+from index.char_decomposition_cache import (
+    CharacterDecompositionCache,
+    parse_lie_decomposition,
+)
 from index.n2_theory_index import (
     _matter_character_multiplicities,
     _parse_input,
@@ -20,6 +23,20 @@ from index.n2_theory_index import (
 HAS_EXTERNAL_BACKEND = (
     shutil.which("form") is not None and shutil.which("lie") is not None
 )
+
+
+class LieDecompositionParserTests(unittest.TestCase):
+    def test_parses_canonical_lie_output_with_whitespace(self):
+        self.assertEqual(
+            parse_lie_decomposition("-1X[0] + 1X[2]\n", 1),
+            {(0,): -1, (2,): 1},
+        )
+
+    def test_normalizes_adjacent_signs_emitted_by_lie(self):
+        self.assertEqual(
+            parse_lie_decomposition("1X[0,3] +-1X[1,1]", 2),
+            {(0, 3): 1, (1, 1): -1},
+        )
 
 
 @unittest.skipUnless(HAS_EXTERNAL_BACKEND, "FORM and LiE are required")

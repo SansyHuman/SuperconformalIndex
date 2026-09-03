@@ -24,9 +24,13 @@ import subprocess
 import tempfile
 
 
+# Highest weight of the representation
 DynkinLabels = tuple[int, ...]
+# Character product number of each order of Adams operation
 AdamsPowers = tuple[int, ...]
+# Character decomposition of key representation and value coefficient
 Decomposition = dict[DynkinLabels, int]
+# Decomposition request of (cartan type, highest weight, Adams powers)
 DecompositionRequest = tuple[str, DynkinLabels, AdamsPowers]
 
 
@@ -38,6 +42,7 @@ _PROCESS_CACHE = None
 
 
 def _canonical_cartan_type(value: str) -> str:
+    """Normalize the algebra name."""
     if not isinstance(value, str):
         raise ValueError("Cartan type must be a string")
     result = re.sub(r"[\s_-]+", "", value).upper()
@@ -47,6 +52,7 @@ def _canonical_cartan_type(value: str) -> str:
 
 
 def _canonical_labels(labels: Iterable[int]) -> DynkinLabels:
+    """Convert the input into a nonempty tuple of nonnegative integers."""
     try:
         result = tuple(int(value) for value in labels)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -57,6 +63,7 @@ def _canonical_labels(labels: Iterable[int]) -> DynkinLabels:
 
 
 def _canonical_adams_powers(powers: Iterable[int]) -> AdamsPowers:
+    """Produce a unique representation of Adams powers."""
     try:
         raw = tuple(int(value) for value in powers)
     except (TypeError, ValueError, OverflowError) as exc:
@@ -73,6 +80,7 @@ def _canonical_adams_powers(powers: Iterable[int]) -> AdamsPowers:
 
 
 def _adams_order(powers: AdamsPowers) -> int:
+    """Calculate the total Adams order."""
     return sum(position * value for position, value in enumerate(powers, start=1))
 
 
@@ -138,6 +146,7 @@ def _generate_decomposition_in_worker(
 
 
 def _format_labels(labels: DynkinLabels) -> str:
+    """Convert Dynkin labels to LiE syntax."""
     return "[" + ",".join(str(value) for value in labels) + "]"
 
 
@@ -292,22 +301,22 @@ class CharacterDecompositionCache:
                     required.add(request)
                     pending.append(request)
 
-        by_factor_count: dict[int, list[DecompositionRequest]] = {}
+        by_level: dict[int, list[DecompositionRequest]] = {}
         for request in required:
             algebra, labels, powers = request
             path = self.cache_path(algebra, labels, _adams_order(powers))
             entries = self._load_cache(path, algebra, labels, _adams_order(powers))
             if powers not in entries:
-                by_factor_count.setdefault(sum(powers), []).append(request)
+                by_level.setdefault(sum(powers), []).append(request)
 
-        if by_factor_count:
-            largest_level = max(len(level) for level in by_factor_count.values())
+        if by_level:
+            max_requests = max(len(level_requests) for level_requests in by_level.values())
             configured_workers = self.max_workers or (os.cpu_count() or 1)
-            worker_count = min(configured_workers, largest_level)
+            worker_count = min(configured_workers, max_requests)
 
             if worker_count == 1:
-                for factor_count in sorted(by_factor_count):
-                    for request in sorted(by_factor_count[factor_count]):
+                for level in sorted(by_level):
+                    for request in sorted(by_level[level]):
                         self.get_decomposition(*request)
             else:
                 with ProcessPoolExecutor(
@@ -321,9 +330,9 @@ class CharacterDecompositionCache:
                         self.timeout,
                     ),
                 ) as executor:
-                    for factor_count in sorted(by_factor_count):
-                        level = sorted(by_factor_count[factor_count])
-                        list(executor.map(_generate_decomposition_in_worker, level))
+                    for level in sorted(by_level):
+                        level_requests = sorted(by_level[level])
+                        list(executor.map(_generate_decomposition_in_worker, level_requests))
 
         for algebra, labels, powers in required:
             path = self.cache_path(algebra, labels, _adams_order(powers))
@@ -383,8 +392,9 @@ class CharacterDecompositionCache:
         labels: DynkinLabels,
         powers: AdamsPowers,
     ) -> Decomposition:
-        factor_count = sum(powers)
-        if factor_count == 1:
+        """Calculate decomposition of given Adams powers."""
+        level = sum(powers)
+        if level == 1:
             adams = next(
                 position
                 for position, value in enumerate(powers, start=1)
@@ -411,6 +421,7 @@ class CharacterDecompositionCache:
         zero: DynkinLabels,
         product: Sequence[Decomposition],
     ) -> str:
+        """Construct a LiE tensor expression for coefficient of singlet."""
         polynomials = [format_lie_decomposition(item) for item in product]
         if len(polynomials) == 2:
             return (
@@ -427,6 +438,7 @@ class CharacterDecompositionCache:
         )
 
     def _run_lie(self, expressions: Sequence[str]) -> list[str]:
+        """Execute LiE on given expressions."""
         result = self._execute_lie(expressions, configure_memory=False)
         lines = self._lie_output_lines(result.stdout)
         needs_retry = (
@@ -451,6 +463,7 @@ class CharacterDecompositionCache:
         *,
         configure_memory: bool,
     ) -> subprocess.CompletedProcess[str]:
+        """Send LiE program through standard input and capture output."""
         commands = list(expressions)
         if configure_memory:
             commands[:0] = [
@@ -476,6 +489,7 @@ class CharacterDecompositionCache:
 
     @staticmethod
     def _lie_output_lines(stdout: str) -> list[str]:
+        """Remove empty lines and LiE's informational messages."""
         return [
             line.strip()
             for line in stdout.splitlines()
@@ -491,6 +505,7 @@ class CharacterDecompositionCache:
         *,
         force_reload: bool = False,
     ) -> dict[AdamsPowers, Decomposition]:
+        """Load json decomposition data."""
         if not force_reload and path in self._memory:
             return self._memory[path]
         if not path.exists():
@@ -530,6 +545,7 @@ class CharacterDecompositionCache:
         order: int,
         entries: dict[AdamsPowers, Decomposition],
     ) -> None:
+        """Serialize decomposition as json and atomically write to file."""
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "schema_version": _SCHEMA_VERSION,
