@@ -1,3 +1,4 @@
+from fractions import Fraction
 import json
 from pathlib import Path
 import shutil
@@ -16,7 +17,9 @@ from index.char_decomposition_cache import (
 from index.n2_theory_index import (
     _matter_character_multiplicities,
     _parse_input,
+    _to_sage_polynomial,
     calculate_index,
+    parse_index_polynomial,
 )
 
 
@@ -126,8 +129,7 @@ class N2TheoryIndexTests(unittest.TestCase):
             6,
             cache_directory=self.cache_directory,
         )
-        t = result.parent().gen()
-        y, u = result.parent().base_ring().gens()
+        t, y, u = result.parent().gens()
         expected = (
             1
             + (36 / u**2 + u**4) * t**4
@@ -175,8 +177,7 @@ class N2TheoryIndexTests(unittest.TestCase):
             10,
             cache_directory=self.cache_directory,
         )
-        t = result.parent().gen()
-        y, u = result.parent().base_ring().gens()
+        t, y, u = result.parent().gens()
         expected = (
             1
             + (2 * u**4 + 10 / u**2) * t**4
@@ -236,11 +237,12 @@ class N2TheoryIndexTests(unittest.TestCase):
         ) * calculate_index(
             right, order, cache_directory=self.cache_directory
         )
-        t = actual.parent().gen()
+        t, y, u = actual.parent().gens()
         expected = sum(
             (
-                actual.parent()(independent[degree]) * t**degree
-                for degree in range(order + 1)
+                coefficient * t**powers[0] * y**powers[1] * u**powers[2]
+                for powers, coefficient in independent.dict().items()
+                if powers[0] <= order
             ),
             actual.parent().zero(),
         )
@@ -292,7 +294,40 @@ class N2TheoryIndexTests(unittest.TestCase):
             4,
             cache_directory=self.cache_directory,
         )
-        self.assertEqual(result[0], 1)
+        self.assertEqual(
+            result.monomial_coefficient(result.parent().one()), 1
+        )
+
+    def test_sage_polynomial_is_a_flat_sum_of_monomials(self):
+        result = _to_sage_polynomial(
+            {
+                (4, 0, 4): Fraction(1),
+                (4, 0, -2): Fraction(36),
+            }
+        )
+
+        self.assertEqual(result.parent().variable_names(), ("t", "y", "u"))
+        self.assertNotIn("(", str(result))
+        self.assertNotIn(")", str(result))
+
+    def test_serialized_index_round_trip(self):
+        original = _to_sage_polynomial(
+            {
+                (0, 0, 0): Fraction(1),
+                (4, 0, -2): Fraction(36),
+                (5, 1, 2): Fraction(-1),
+                (6, 0, -3): Fraction(7, 3),
+            }
+        )
+
+        restored = parse_index_polynomial(str(original))
+
+        self.assertEqual(restored, original)
+        self.assertIs(restored.parent(), original.parent())
+
+    def test_index_parser_rejects_non_polynomial_text(self):
+        with self.assertRaisesRegex(ValueError, "invalid"):
+            parse_index_polynomial("__import__('os')")
 
     def test_three_factor_projection_is_independent_of_factor_order(self):
         factor_ids = ("first", "second", "third")

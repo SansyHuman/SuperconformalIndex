@@ -27,7 +27,7 @@ from typing import Any
 if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sage.all import LaurentPolynomialRing, PolynomialRing, QQ
+from sage.all import LaurentPolynomialRing, QQ, sage_eval
 
 from anomalies.check_n2_anomalies import (
     GaugeFactorData,
@@ -54,6 +54,11 @@ CharacterSpec = tuple[int, DynkinLabels]
 CharacterMonomial = tuple[CharacterSpec, ...]
 # Character monomial after every character has been assigned a FORM character number
 IndexedMonomial = tuple[int, ...]
+
+INDEX_POLYNOMIAL_RING = LaurentPolynomialRing(
+    QQ, 3, names=("t", "y", "u")
+)
+_INDEX_POLYNOMIAL_TEXT_PATTERN = re.compile(r"[0-9tyu+\-*/^()\s]+")
 
 
 @dataclass(frozen=True)
@@ -458,16 +463,39 @@ def _project_terms(
 def _to_sage_polynomial(
     projected: dict[tuple[int, int, int], Fraction]
 ) -> Any:
-    """Convert the projected dictionary to sage polynomial."""
-    coefficient_ring = LaurentPolynomialRing(QQ, 2, names=("y", "u"))
-    y, u = coefficient_ring.gens()
-    index_ring = PolynomialRing(coefficient_ring, "t")
-    t = index_ring.gen()
+    """Convert projected terms to one flat Sage Laurent polynomial."""
+    index_ring = INDEX_POLYNOMIAL_RING
+    t, y, u = index_ring.gens()
     result = index_ring.zero()
     for (t_power, y_power, u_power), coefficient in projected.items():
         sage_coefficient = QQ(coefficient.numerator) / coefficient.denominator
-        result += index_ring(sage_coefficient * y**y_power * u**u_power) * t**t_power
+        result += (
+            sage_coefficient
+            * t**t_power
+            * y**y_power
+            * u**u_power
+        )
     return result
+
+
+def parse_index_polynomial(value: str) -> Any:
+    """Restore a serialized superconformal index as a Sage polynomial."""
+    if not isinstance(value, str):
+        raise TypeError("superconformal index must be a string")
+    if not value.strip() or _INDEX_POLYNOMIAL_TEXT_PATTERN.fullmatch(value) is None:
+        raise ValueError("invalid superconformal-index polynomial string")
+
+    try:
+        expression = sage_eval(
+            value,
+            locals=INDEX_POLYNOMIAL_RING.gens_dict(),
+            preparse=True,
+        )
+        return INDEX_POLYNOMIAL_RING(expression)
+    except (ArithmeticError, NameError, SyntaxError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "invalid superconformal-index polynomial string"
+        ) from exc
 
 
 def calculate_index(
@@ -483,6 +511,32 @@ def calculate_index(
     """Calculate the exact simple- or product-group index through ``t^order``."""
     order = _as_nonnegative_int(order, "order")
     factors, hypermultiplets = _parse_input(data)
+
+    return calculate_index_internal(
+        factors,
+        hypermultiplets,
+        order,
+        cache_directory=cache_directory,
+        lie_executable=lie_executable,
+        form_executable=form_executable,
+        timeout=timeout,
+        processes=processes,
+    )
+
+
+def calculate_index_internal(
+    factors: tuple[GaugeFactorData, ...],
+    hypermultiplets: list[HyperData | ProductHyperData],
+    order: int,
+    *,
+    cache_directory: str | Path | None = None,
+    lie_executable: str = "lie",
+    form_executable: str = "form",
+    timeout: float = 600,
+    processes: int | None = None,
+) -> Any:
+    """Calculate an index from already validated internal theory data."""
+    order = _as_nonnegative_int(order, "order")
 
     if order < 2:
         return _to_sage_polynomial({(0, 0, 0): Fraction(1)})

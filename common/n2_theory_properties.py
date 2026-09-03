@@ -4,13 +4,15 @@
 The input JSON schema is the same one accepted by
 ``anomalies.check_n2_anomalies``. The implemented properties are the connected
 continuous flavor symmetry at the massless point, the local complex dimension
-of the conformal manifold, and the conformal central charges. The Coulomb-
-branch spectrum and superconformal indices are reserved for later integration.
+of the conformal manifold, the conformal central charges, and the
+superconformal index. The Coulomb-branch spectrum is reserved for later
+integration.
 """
 
 from __future__ import annotations
 
 import argparse
+import multiprocessing
 from dataclasses import dataclass
 from fractions import Fraction
 import json
@@ -22,6 +24,7 @@ if not __package__:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from anomalies.check_n2_anomalies import (
+    GaugeFactorData,
     HyperData,
     ProductHyperData,
     check_input_data,
@@ -31,6 +34,7 @@ from anomalies.lie_algebra import (
     conjugate_dynkin_labels,
     get_lie_algebra,
 )
+from index.n2_theory_index import calculate_index_internal
 
 if __package__:
     from .json_utils import json_text
@@ -38,6 +42,13 @@ else:
     from common.json_utils import json_text
 
 RepresentationKey = tuple[tuple[str, DynkinLabels], ...]
+
+INDEX_MAX_ORDER = 18
+INDEX_CACHE_DIRECTORY = Path(__file__).resolve().parents[1] / "char_decomposition_cache"
+LIE_EXECUTABLE = "lie"
+FORM_EXECUTABLE = "form"
+DEFAULT_TIMEOUT = 600
+DEFAULT_PROCESS_COUNT = multiprocessing.cpu_count()
 
 
 @dataclass
@@ -286,6 +297,36 @@ def _calculate_central_charges(
     return {"a": a, "c": c}
 
 
+def _calculate_superconformal_index(
+    anomaly_result: dict[str, Any],
+) -> Any:
+    """Calculate the superconformal index."""
+    if "gauge_factors" in anomaly_result:
+        factors = tuple(
+            GaugeFactorData(
+                factor["id"], get_lie_algebra(factor["algebra"])
+            )
+            for factor in anomaly_result["gauge_factors"]
+        )
+    else:
+        factors = (
+            GaugeFactorData(
+                "gauge", get_lie_algebra(anomaly_result["algebra"])
+            ),
+        )
+    hypermultiplets = anomaly_result["hypermultiplets"]
+    return calculate_index_internal(
+        factors,
+        hypermultiplets,
+        INDEX_MAX_ORDER,
+        cache_directory=INDEX_CACHE_DIRECTORY,
+        lie_executable=LIE_EXECUTABLE,
+        form_executable=FORM_EXECUTABLE,
+        timeout=DEFAULT_TIMEOUT,
+        processes=DEFAULT_PROCESS_COUNT,
+    )
+
+
 def _validated_anomaly_result(data: dict[str, Any]) -> dict[str, Any]:
     """Check the input and return its parsed anomaly result."""
     anomaly_result = check_input_data(data)
@@ -311,6 +352,11 @@ def calculate_n2_theory_properties(data: dict[str, Any]) -> dict[str, Any]:
         if anomaly_result["lagrangian_scft_candidate"]
         else None
     )
+    superconformal_index = (
+        str(_calculate_superconformal_index(anomaly_result))
+        if anomaly_result["lagrangian_scft_candidate"]
+        else None
+    )
     return {
         "group": anomaly_result["group"],
         "lagrangian_scft_candidate": anomaly_result[
@@ -321,7 +367,7 @@ def calculate_n2_theory_properties(data: dict[str, Any]) -> dict[str, Any]:
         "exactly_marginal_gauge_couplings": marginal_couplings,
         "central_charges": central_charges,
         "coulomb_branch_spectrum": None,
-        "superconformal_indices": None,
+        "superconformal_index": superconformal_index,
     }
 
 
@@ -350,10 +396,11 @@ def calculate_coulomb_branch_spectrum(data: dict[str, Any]) -> Any:
     )
 
 
-def calculate_superconformal_indices(data: dict[str, Any]) -> Any:
-    raise NotImplementedError(
-        "superconformal indices are not implemented in this module"
-    )
+def calculate_superconformal_index(data: dict[str, Any]) -> Any:
+    anomaly_result = _validated_anomaly_result(data)
+    if not anomaly_result["lagrangian_scft_candidate"]:
+        return None
+    return _calculate_superconformal_index(anomaly_result)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -362,7 +409,13 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         result = calculate_n2_theory_properties_from_file(args.input)
-    except (OSError, json.JSONDecodeError, ValueError, ArithmeticError) as exc:
+    except (
+        OSError,
+        json.JSONDecodeError,
+        ValueError,
+        ArithmeticError,
+        RuntimeError,
+    ) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
     print(json_text(result, indent=2))

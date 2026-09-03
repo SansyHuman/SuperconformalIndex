@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 
 PROJECT_ROOT = Path(__file__).parents[1]
@@ -14,6 +15,15 @@ from common import n2_theory_properties as properties
 
 
 class TheoryPropertyTests(unittest.TestCase):
+    def setUp(self):
+        index_patcher = patch.object(
+            properties,
+            "calculate_index_internal",
+            return_value="mock_index",
+        )
+        self.calculate_index_internal = index_patcher.start()
+        self.addCleanup(index_patcher.stop)
+
     def test_complex_conjugate_full_hypers_share_one_flavor_block(self):
         result = properties.calculate_n2_theory_properties(
             {
@@ -169,13 +179,35 @@ class TheoryPropertyTests(unittest.TestCase):
             )
 
     def test_deferred_properties_raise_not_implemented(self):
-        for function in (
-            properties.calculate_coulomb_branch_spectrum,
-            properties.calculate_superconformal_indices,
-        ):
-            with self.subTest(function=function.__name__):
-                with self.assertRaises(NotImplementedError):
-                    function({})
+        with self.assertRaises(NotImplementedError):
+            properties.calculate_coulomb_branch_spectrum({})
+
+    def test_superconformal_index_uses_singular_key_and_internal_calculation(self):
+        data = {
+            "algebra": "A1",
+            "hypermultiplets": [
+                {"representation": "fundamental", "number": 4}
+            ],
+        }
+
+        result = properties.calculate_n2_theory_properties(data)
+
+        self.assertEqual(result["superconformal_index"], "mock_index")
+        self.assertNotIn("superconformal_indices", result)
+        self.calculate_index_internal.assert_called_once()
+
+    def test_public_superconformal_index_uses_internal_calculation(self):
+        result = properties.calculate_superconformal_index(
+            {
+                "algebra": "A1",
+                "hypermultiplets": [
+                    {"representation": "fundamental", "number": 4}
+                ],
+            }
+        )
+
+        self.assertEqual(result, "mock_index")
+        self.calculate_index_internal.assert_called_once()
 
 
 if __name__ == "__main__":

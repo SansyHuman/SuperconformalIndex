@@ -78,6 +78,14 @@ class _RecordingConnection:
 
 
 class TheoryDatabaseUnitTests(unittest.TestCase):
+    def setUp(self):
+        index_patcher = patch(
+            "common.n2_theory_properties.calculate_index_internal",
+            return_value="mock_index",
+        )
+        index_patcher.start()
+        self.addCleanup(index_patcher.stop)
+
     def test_schema_uses_mysql_types_and_innodb(self):
         self.assertIn("AUTO_INCREMENT", database.SCHEMA_SQL)
         self.assertIn("ENGINE=InnoDB", database.SCHEMA_SQL)
@@ -95,6 +103,8 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
             "idx_theory_properties_central_charge_a",
             database.SCHEMA_SQL,
         )
+        self.assertIn("superconformal_index_json JSON NULL", database.SCHEMA_SQL)
+        self.assertNotIn("superconformal_indices_json", database.SCHEMA_SQL)
         self.assertNotIn("AUTOINCREMENT", database.SCHEMA_SQL)
         self.assertNotIn("CREATE INDEX IF NOT EXISTS", database.SCHEMA_SQL)
 
@@ -121,7 +131,7 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
             for statement, parameters in connection.statements
             if "INSERT INTO schema_metadata" in statement
         )
-        self.assertEqual(metadata_parameters, ("schema_version", "2"))
+        self.assertEqual(metadata_parameters, ("schema_version", "3"))
 
     def test_initialize_database_migrates_version_one_schema(self):
         connection = _RecordingConnection(
@@ -130,19 +140,46 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
 
         database.initialize_database(connection)
 
-        migration = next(
+        migrations = [
             statement
             for statement, _ in connection.statements
             if statement.startswith("ALTER TABLE theory_properties")
-        )
-        self.assertIn("central_charge_a_decimal", migration)
-        self.assertIn("central_charge_c_decimal", migration)
-        metadata_parameters = next(
+        ]
+        self.assertIn("central_charge_a_decimal", migrations[0])
+        self.assertIn("central_charge_c_decimal", migrations[0])
+        self.assertIn("superconformal_index_json", migrations[1])
+        metadata_parameters = [
             parameters
             for statement, parameters in connection.statements
             if statement.startswith("UPDATE schema_metadata")
+        ]
+        self.assertEqual(
+            metadata_parameters,
+            [("2", "schema_version"), ("3", "schema_version")],
         )
-        self.assertEqual(metadata_parameters, ("2", "schema_version"))
+
+    def test_initialize_database_migrates_version_two_schema(self):
+        connection = _RecordingConnection(
+            select_rows=[{"metadata_value": "2"}]
+        )
+
+        database.initialize_database(connection)
+
+        statements = [statement for statement, _ in connection.statements]
+        rename = next(
+            statement
+            for statement in statements
+            if statement.startswith("ALTER TABLE theory_properties")
+        )
+        self.assertIn("superconformal_indices_json", rename)
+        self.assertIn("superconformal_index_json", rename)
+        self.assertTrue(
+            any(
+                statement.startswith("UPDATE theory_properties")
+                and "$.superconformal_index" in statement
+                for statement in statements
+            )
+        )
 
     def test_connect_database_uses_pymysql_options(self):
         connection = MagicMock()
@@ -286,9 +323,15 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
             "c": {"numerator": 22, "denominator": 1},
         }
         self.assertEqual(json.loads(parameters[5]), expected)
+        self.assertEqual(json.loads(parameters[7]), "mock_index")
+        shared_properties = json.loads(parameters[8])
         self.assertEqual(
-            json.loads(parameters[8])["central_charges"], expected
+            shared_properties["central_charges"], expected
         )
+        self.assertEqual(
+            shared_properties["superconformal_index"], "mock_index"
+        )
+        self.assertNotIn("superconformal_indices", shared_properties)
 
     def test_store_commits_successful_transaction(self):
         connection = MagicMock()

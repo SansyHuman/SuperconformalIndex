@@ -49,7 +49,7 @@ from anomalies.check_n2_anomalies import (
 from anomalies.lie_algebra import conjugate_dynkin_labels
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS theory_properties (
             )
         ) STORED,
     coulomb_branch_spectrum_json JSON NULL,
-    superconformal_indices_json JSON NULL,
+    superconformal_index_json JSON NULL,
     properties_json JSON NOT NULL,
     PRIMARY KEY (theory_id),
     KEY idx_theory_properties_central_charge_a (
@@ -321,6 +321,26 @@ SCHEMA_MIGRATIONS = {
             ADD KEY idx_theory_properties_central_charge_c (
                 central_charge_c_decimal
             )
+        """,
+    ),
+    2: (
+        """
+        ALTER TABLE theory_properties
+            CHANGE COLUMN superconformal_indices_json
+            superconformal_index_json JSON NULL
+        """,
+        """
+        UPDATE theory_properties
+        SET properties_json = JSON_SET(
+            JSON_REMOVE(properties_json, '$.superconformal_indices'),
+            '$.superconformal_index',
+            JSON_EXTRACT(properties_json, '$.superconformal_indices')
+        )
+        WHERE JSON_CONTAINS_PATH(
+            properties_json,
+            'one',
+            '$.superconformal_indices'
+        )
         """,
     ),
 }
@@ -558,7 +578,7 @@ def _shared_properties(properties: dict[str, Any]) -> dict[str, Any]:
         "coulomb_branch_spectrum": properties[
             "coulomb_branch_spectrum"
         ],
-        "superconformal_indices": properties["superconformal_indices"],
+        "superconformal_index": properties["superconformal_index"],
     }
 
 
@@ -651,7 +671,7 @@ def _insert_shared_properties(
             conformal_manifold_dimension,
             central_charges_json,
             coulomb_branch_spectrum_json,
-            superconformal_indices_json,
+            superconformal_index_json,
             properties_json
         )
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -664,7 +684,7 @@ def _insert_shared_properties(
             properties["conformal_manifold_dimension"],
             _optional_json_text(properties["central_charges"]),
             _optional_json_text(properties["coulomb_branch_spectrum"]),
-            _optional_json_text(properties["superconformal_indices"]),
+            _optional_json_text(properties["superconformal_index"]),
             serialized,
         ),
     )
