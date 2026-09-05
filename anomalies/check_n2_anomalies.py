@@ -74,7 +74,6 @@ from typing import Any, Iterable
 if __package__:
     from .lie_algebra import (
         SimpleLieAlgebra,
-        _as_nonnegative_int,
         dynkin_index as lie_dynkin_index,
         get_lie_algebra,
         named_representation_labels,
@@ -83,9 +82,9 @@ if __package__:
         validate_dynkin_labels,
     )
 else:  # Support direct execution: sage -python anomalies/check_n2_anomalies.py
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from lie_algebra import (
         SimpleLieAlgebra,
-        _as_nonnegative_int,
         dynkin_index as lie_dynkin_index,
         get_lie_algebra,
         named_representation_labels,
@@ -93,6 +92,8 @@ else:  # Support direct execution: sage -python anomalies/check_n2_anomalies.py
         representation_reality as lie_representation_reality,
         validate_dynkin_labels,
     )
+
+from common.number_utils import as_nonnegative_int
 
 
 @dataclass(frozen=True)
@@ -217,7 +218,7 @@ def check_simple_theory(
             continue
         try:
             rep = parse_lie_representation(algebra, item)
-            number = _as_nonnegative_int(
+            number = as_nonnegative_int(
                 item.get("number", item.get("multiplicity", 1)), "number"
             )
             kind = str(item.get("kind", "full")).strip().lower()
@@ -371,7 +372,7 @@ def check_product_theory(
                     factor, specification
                 )
 
-            number = _as_nonnegative_int(
+            number = as_nonnegative_int(
                 item.get("number", item.get("multiplicity", 1)), "number"
             )
             kind = str(item.get("kind", "full")).strip().lower()

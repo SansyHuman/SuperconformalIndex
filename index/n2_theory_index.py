@@ -37,15 +37,14 @@ from anomalies.check_n2_anomalies import (
 )
 from anomalies.lie_algebra import (
     DynkinLabels,
-    _as_nonnegative_int,
     conjugate_dynkin_labels,
     get_lie_algebra,
 )
 from index.char_decomposition_cache import (
     AdamsPowers,
     CharacterDecompositionCache,
-    Decomposition,
 )
+from common.number_utils import as_nonnegative_int
 
 
 # A pair (gauge factor position, highest weight of representation)
@@ -509,7 +508,7 @@ def calculate_index(
     processes: int | None = None,
 ) -> Any:
     """Calculate the exact simple- or product-group index through ``t^order``."""
-    order = _as_nonnegative_int(order, "order")
+    order = as_nonnegative_int(order, "order")
     factors, hypermultiplets = _parse_input(data)
 
     return calculate_index_internal(
@@ -536,7 +535,7 @@ def calculate_index_internal(
     processes: int | None = None,
 ) -> Any:
     """Calculate an index from already validated internal theory data."""
-    order = _as_nonnegative_int(order, "order")
+    order = as_nonnegative_int(order, "order")
 
     if order < 2:
         return _to_sage_polynomial({(0, 0, 0): Fraction(1)})

@@ -18,6 +18,8 @@ from functools import lru_cache
 import re
 from typing import Any, Iterable
 
+from common.number_utils import as_nonnegative_int, as_integer
+
 try:
     from sage.all import CartanType, RootSystem, WeylCharacterRing
 except ImportError as exc:  # pragma: no cover - exercised only outside Sage
@@ -72,30 +74,9 @@ class SimpleLieAlgebra:
         )
 
 
-def _as_nonnegative_int(value: Any, field_name: str) -> int:
-    """Converts value to integer and raise error if it is not nonnegative integer."""
-    if isinstance(value, bool):
-        raise ValueError(f"{field_name} must be a nonnegative integer")
-    try:
-        result = int(value)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{field_name} must be a nonnegative integer") from exc
-    if result != value or result < 0:
-        raise ValueError(f"{field_name} must be a nonnegative integer")
-    return result
-
-
 def _fraction(value: Any) -> Fraction:
     """Convert a Sage exact rational or integer to a stdlib Fraction."""
     return Fraction(str(value))
-
-
-def _exact_int(value: Any, description: str) -> int:
-    """Converts value to integer and raise error if it is not an integer."""
-    result = int(value)
-    if result != value:
-        raise ArithmeticError(f"{description} should be integral, got {value}")
-    return result
 
 
 def parse_cartan_type(value: Any) -> tuple[str, int]:
@@ -149,7 +130,7 @@ def _get_lie_algebra(family: str, rank: int) -> SimpleLieAlgebra:
     highest_root = weight_space.highest_root()
     simple_coroots = weight_space.simple_coroots()
     adjoint_labels = tuple(
-        _exact_int(
+        as_integer(
             highest_root.scalar(simple_coroots[index]),
             "highest-root Dynkin label",
         )
@@ -191,7 +172,7 @@ def validate_dynkin_labels(
             "Dynkin labels must be an iterable of nonnegative integers"
         ) from exc
     result = tuple(
-        _as_nonnegative_int(value, f"Dynkin label {position}")
+        as_nonnegative_int(value, f"Dynkin label {position}")
         for position, value in enumerate(raw_labels, start=1)
     )
     if len(result) != algebra.rank:
@@ -234,7 +215,7 @@ def conjugate_dynkin_labels(
     dual_weight = character.dual().highest_weight()
     simple_coroots = algebra.weight_space.simple_coroots()
     return tuple(
-        _exact_int(
+        as_integer(
             dual_weight.scalar(simple_coroots[index]),
             "dual Dynkin label",
         )
@@ -329,7 +310,7 @@ def representation_dimension(
     """Return the Sage Weyl-character degree of an irreducible representation."""
     algebra = _coerce_algebra(algebra)
     _, character = _irrep(algebra, labels)
-    return _exact_int(character.degree(), "representation dimension")
+    return as_integer(character.degree(), "representation dimension")
 
 
 def quadratic_casimir(
@@ -362,7 +343,7 @@ def representation_reality(
     """Classify an irrep using Sage's Frobenius-Schur indicator."""
     algebra = _coerce_algebra(algebra)
     _, character = _irrep(algebra, labels)
-    indicator = _exact_int(
+    indicator = as_integer(
         character.frobenius_schur_indicator(),
         "Frobenius-Schur indicator",
     )
