@@ -20,6 +20,12 @@ The lower-level :func:`calculate_plethystic_exponential` also accepts signed
 coefficients.  It can therefore be reused when a future non-Lagrangian
 implementation supplies generators and relations rather than a freely
 generated Coulomb-branch spectrum.
+
+The inverse direction is implemented by
+:func:`calculate_plethystic_logarithm`, which evaluates the ordinary
+logarithm with FORM and applies the exact Moebius transform.  The stricter
+:func:`extract_coulomb_branch_spectrum` interprets its nonnegative integral
+coefficients as repeated generator dimensions.
 """
 
 from __future__ import annotations
@@ -31,7 +37,7 @@ from math import lcm
 import re
 from typing import Any
 
-from sage.all import PuiseuxSeriesRing, QQ, WeylGroup
+from sage.all import Infinity, PuiseuxSeriesRing, QQ, WeylGroup, sage_eval
 
 from anomalies.check_n2_anomalies import GaugeFactorData
 from common.form_utils import run_form, split_signed_terms, split_top_level
@@ -51,6 +57,7 @@ COULOMB_INDEX_RING = PuiseuxSeriesRing(QQ, "x")
 _RATIONAL_RE = re.compile(r"d\((-?\d+),(-?\d+)\)\Z")
 _POWER_RE = re.compile(r"q(?:\^(\d+))?\Z")
 _INTEGER_RE = re.compile(r"\d+\Z")
+_COULOMB_INDEX_TEXT_PATTERN = re.compile(r"[0-9x+\-*/^()\s]+\Z")
 
 
 def _normalize_plethystic_log(
@@ -211,6 +218,66 @@ Print result;
 """
 
 
+def _format_form_polynomial(terms: Mapping[int, Fraction]) -> str:
+    """Format an exact univariate polynomial for a FORM program."""
+    pieces: list[str] = []
+    for degree, coefficient in sorted(terms.items()):
+        if not coefficient:
+            continue
+        absolute = abs(coefficient)
+        power = "q" if degree == 1 else f"q^{degree}"
+        if absolute == 1:
+            body = power
+        elif absolute.denominator == 1:
+            body = f"{absolute.numerator}*{power}"
+        else:
+            body = (
+                f"d({absolute.numerator},{absolute.denominator})*{power}"
+            )
+
+        if not pieces:
+            pieces.append(body if coefficient > 0 else f"-{body}")
+        else:
+            pieces.append(f"+{body}" if coefficient > 0 else f"-{body}")
+    return "".join(pieces) or "0"
+
+
+def _build_plethystic_log_form_program(
+    terms: Mapping[int, Fraction], order: int
+) -> str:
+    """Build a FORM program for the truncated ordinary logarithm."""
+    minimum_degree = min(terms)
+    maximum_log_power = order // minimum_degree
+    delta = _format_form_polynomial(terms)
+
+    logarithm_steps = ""
+    if maximum_log_power >= 2:
+        logarithm_steps = f"""#do k=2,{maximum_log_power}
+  id z=1-z*delta*(`k'-1)/`k';
+  .sort:step `k';
+#enddo
+"""
+
+    return f"""#: MaxTermSize 600000
+Off statistics;
+S k,z,q(:{order});
+CF d;
+PolyRatFun d;
+
+L delta={delta};
+.sort
+
+L logarithm=z*delta;
+{logarithm_steps}.sort
+
+L result=logarithm;
+id z=1;
+.sort
+Print result;
+.end
+"""
+
+
 def _parse_form_series(output: str) -> dict[int, Fraction]:
     """Parse FORM's exact univariate result without passing through floats."""
     marker = "result ="
@@ -264,6 +331,210 @@ def _to_coulomb_series(
         sage_dimension = QQ(dimension.numerator) / dimension.denominator
         result += sage_coefficient * x**sage_dimension
     return result
+
+
+def parse_coulomb_branch_index(value: str) -> Any:
+    """Restore a serialized Coulomb-branch index as a Sage Puiseux series."""
+    if not isinstance(value, str):
+        raise TypeError("Coulomb-branch index must be a string")
+    if (
+        not value.strip()
+        or _COULOMB_INDEX_TEXT_PATTERN.fullmatch(value) is None
+    ):
+        raise ValueError("invalid Coulomb-branch index string")
+
+    try:
+        expression = sage_eval(
+            value,
+            locals=COULOMB_INDEX_RING.gens_dict(),
+            preparse=True,
+        )
+        return COULOMB_INDEX_RING(expression)
+    except (ArithmeticError, NameError, SyntaxError, TypeError, ValueError) as exc:
+        raise ValueError("invalid Coulomb-branch index string") from exc
+
+
+def _normalize_coulomb_index(
+    coulomb_branch_index: Any,
+    maximum: Fraction,
+) -> dict[Fraction, Fraction]:
+    """Validate and truncate a Coulomb index with constant coefficient one."""
+    if isinstance(coulomb_branch_index, str):
+        series = parse_coulomb_branch_index(coulomb_branch_index)
+    else:
+        try:
+            series = COULOMB_INDEX_RING(coulomb_branch_index)
+        except (ArithmeticError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "coulomb_branch_index must be a series in the project's x ring"
+            ) from exc
+
+    precision = series.precision_absolute()
+    sage_maximum = QQ(maximum.numerator) / maximum.denominator
+    if precision != Infinity and sage_maximum >= precision:
+        raise ValueError(
+            "max_dimension must be smaller than the Coulomb index precision"
+        )
+
+    terms: dict[Fraction, Fraction] = {}
+    for sage_dimension, sage_coefficient in zip(
+        series.exponents(), series.coefficients(), strict=True
+    ):
+        dimension = Fraction(str(sage_dimension))
+        coefficient = Fraction(str(sage_coefficient))
+        if dimension < 0:
+            raise ValueError(
+                "coulomb_branch_index cannot contain negative dimensions"
+            )
+        if dimension <= maximum and coefficient:
+            terms[dimension] = coefficient
+
+    if terms.pop(Fraction(0), Fraction(0)) != 1:
+        raise ValueError(
+            "coulomb_branch_index must have constant coefficient one"
+        )
+    return terms
+
+
+def _mobius(number: int) -> int:
+    """Return the number-theoretic Moebius function of a positive integer."""
+    remaining = number
+    result = 1
+    factor = 2
+    while factor * factor <= remaining:
+        if remaining % factor:
+            factor += 1
+            continue
+        remaining //= factor
+        result = -result
+        if remaining % factor == 0:
+            return 0
+        factor += 1
+    if remaining > 1:
+        result = -result
+    return result
+
+
+def _apply_mobius_transform(
+    ordinary_log: Mapping[int, Fraction], order: int
+) -> dict[int, Fraction]:
+    """Convert coefficients of log(I(q)) to those of PL(I(q))."""
+    if not ordinary_log:
+        return {}
+
+    result: dict[int, Fraction] = {}
+    maximum_adams = order // min(ordinary_log)
+    for adams in range(1, maximum_adams + 1):
+        mobius = _mobius(adams)
+        if not mobius:
+            continue
+        factor = Fraction(mobius, adams)
+        for power, coefficient in ordinary_log.items():
+            transformed_power = adams * power
+            if transformed_power > order:
+                continue
+            updated = (
+                result.get(transformed_power, Fraction(0))
+                + factor * coefficient
+            )
+            if updated:
+                result[transformed_power] = updated
+            else:
+                result.pop(transformed_power, None)
+    return result
+
+
+def calculate_plethystic_logarithm(
+    coulomb_branch_index: Any,
+    max_dimension: Any,
+    *,
+    form_executable: str = "form",
+    timeout: float = 600,
+) -> Any:
+    """Calculate the truncated plethystic logarithm of a Coulomb index.
+
+    The returned Sage Puiseux series contains signed rational coefficients.
+    Positive integral coefficients can describe generators, while negative
+    integral coefficients can describe relations.  ``max_dimension`` must
+    not exceed the dimension through which the input index is known.
+    """
+    maximum = as_nonnegative_fraction(max_dimension, "max_dimension")
+    normalized = _normalize_coulomb_index(coulomb_branch_index, maximum)
+    if not normalized or maximum == 0:
+        return COULOMB_INDEX_RING.zero()
+
+    scale = lcm(
+        maximum.denominator,
+        *(dimension.denominator for dimension in normalized),
+    )
+    scaled_order = (maximum * scale).numerator
+    scaled_terms = {
+        (dimension * scale).numerator: coefficient
+        for dimension, coefficient in normalized.items()
+    }
+    program = _build_plethystic_log_form_program(
+        scaled_terms, scaled_order
+    )
+    output = run_form(
+        program,
+        form_executable=form_executable,
+        timeout=timeout,
+    )
+    ordinary_log = _parse_form_series(output)
+    plethystic_log = _apply_mobius_transform(
+        ordinary_log, scaled_order
+    )
+    physical_terms = {
+        Fraction(power, scale): coefficient
+        for power, coefficient in plethystic_log.items()
+    }
+    return _to_coulomb_series(physical_terms)
+
+
+def extract_coulomb_branch_spectrum_from_index(
+    coulomb_branch_index: Any,
+    max_dimension: Any,
+    *,
+    form_executable: str = "form",
+    timeout: float = 600,
+) -> tuple[Fraction, ...]:
+    """Extract a freely generated spectrum through ``max_dimension``.
+
+    A negative or nonintegral coefficient in the plethystic logarithm means
+    that it cannot be interpreted as a multiset of free generators through
+    the requested cutoff.  Use :func:`calculate_plethystic_logarithm` when
+    signed generator-and-relation data is required instead.
+    """
+    plethystic_log = calculate_plethystic_logarithm(
+        coulomb_branch_index,
+        max_dimension,
+        form_executable=form_executable,
+        timeout=timeout,
+    )
+    spectrum: list[Fraction] = []
+    for sage_dimension, sage_coefficient in zip(
+        plethystic_log.exponents(),
+        plethystic_log.coefficients(),
+        strict=True,
+    ):
+        dimension = Fraction(str(sage_dimension))
+        try:
+            multiplicity = as_integer(
+                sage_coefficient,
+                f"plethystic-log coefficient at dimension {dimension}",
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "the Coulomb index has a nonintegral plethystic-log "
+                f"coefficient at dimension {dimension}"
+            ) from exc
+        if multiplicity < 0:
+            raise ValueError(
+                "the Coulomb index has relations through max_dimension; "
+                "use calculate_plethystic_logarithm for signed data"
+            )
+        spectrum.extend([dimension] * multiplicity)
+    return tuple(spectrum)
 
 
 def calculate_plethystic_exponential(

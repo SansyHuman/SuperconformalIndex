@@ -10,13 +10,16 @@ from sage.all import QQ
 PROJECT_ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from index.n2_theory_branches import (
+from index.n2_theory_coulomb_branches import (
     COULOMB_INDEX_RING,
     calculate_coulomb_branch_index,
     calculate_coulomb_branch_index_from_full_index,
     calculate_lagrangian_coulomb_branch_index,
     calculate_plethystic_exponential,
+    calculate_plethystic_logarithm,
     coulomb_branch_spectrum_from_gauge_factors,
+    extract_coulomb_branch_spectrum_from_index,
+    parse_coulomb_branch_index,
 )
 from index.n2_theory_index import _to_sage_polynomial
 from anomalies.check_n2_anomalies import GaugeFactorData
@@ -75,6 +78,51 @@ class CoulombBranchPlethysticTests(unittest.TestCase):
             result,
             1 + 2 * x**2 + 2 * x**4 + 2 * x**6 + 2 * x**8,
         )
+
+    def test_plethystic_logarithm_recovers_spectrum(self):
+        index = calculate_coulomb_branch_index([2, 3], 8)
+        x = COULOMB_INDEX_RING.gen()
+
+        self.assertEqual(
+            calculate_plethystic_logarithm(index, 8),
+            x**2 + x**3,
+        )
+        self.assertEqual(
+            extract_coulomb_branch_spectrum_from_index(index, 8),
+            (Fraction(2), Fraction(3)),
+        )
+
+    def test_spectrum_extraction_preserves_multiplicity(self):
+        index = calculate_coulomb_branch_index({2: 2}, 8)
+        self.assertEqual(
+            extract_coulomb_branch_spectrum_from_index(index, 8),
+            (Fraction(2), Fraction(2)),
+        )
+
+    def test_plethystic_logarithm_accepts_serialized_fractional_index(self):
+        maximum = Fraction(18, 5)
+        index = calculate_coulomb_branch_index([Fraction(6, 5)], maximum)
+        x = COULOMB_INDEX_RING.gen()
+
+        self.assertEqual(
+            calculate_plethystic_logarithm(str(index), maximum),
+            x ** Fraction(6, 5),
+        )
+        self.assertEqual(
+            extract_coulomb_branch_spectrum_from_index(str(index), maximum),
+            (Fraction(6, 5),),
+        )
+
+    def test_plethystic_logarithm_retains_relations(self):
+        index = calculate_plethystic_exponential({2: 2, 4: -1}, 8)
+        x = COULOMB_INDEX_RING.gen()
+
+        self.assertEqual(
+            calculate_plethystic_logarithm(index, 8),
+            2 * x**2 - x**4,
+        )
+        with self.assertRaisesRegex(ValueError, "relations"):
+            extract_coulomb_branch_spectrum_from_index(index, 8)
 
 
 class CoulombLimitFromFullIndexTests(unittest.TestCase):
@@ -206,6 +254,59 @@ class CoulombBranchValidationTests(unittest.TestCase):
     def test_rejects_inexact_float_dimensions(self):
         with self.assertRaisesRegex(ValueError, "exact"):
             calculate_coulomb_branch_index([1.2], 4)
+
+    def test_parse_coulomb_branch_index(self):
+        x = COULOMB_INDEX_RING.gen()
+        self.assertEqual(
+            parse_coulomb_branch_index("1 + x^(6/5) + 2*x^(12/5)"),
+            1 + x ** Fraction(6, 5) + 2 * x ** Fraction(12, 5),
+        )
+
+    def test_parse_coulomb_branch_index_rejects_unsafe_text(self):
+        with self.assertRaisesRegex(ValueError, "invalid"):
+            parse_coulomb_branch_index("__import__('os').system('true')")
+
+    def test_plethystic_logarithm_requires_unit_constant(self):
+        x = COULOMB_INDEX_RING.gen()
+        with self.assertRaisesRegex(ValueError, "constant coefficient one"):
+            calculate_plethystic_logarithm(
+                2 + x**2,
+                4,
+                form_executable="missing-form-for-test",
+            )
+
+    def test_plethystic_logarithm_rejects_negative_dimension(self):
+        x = COULOMB_INDEX_RING.gen()
+        with self.assertRaisesRegex(ValueError, "negative dimensions"):
+            calculate_plethystic_logarithm(
+                1 + x ** Fraction(-1, 2),
+                4,
+                form_executable="missing-form-for-test",
+            )
+
+    def test_plethystic_logarithm_requires_sufficient_precision(self):
+        x = COULOMB_INDEX_RING.gen()
+        truncated_index = (1 + x**2).add_bigoh(4)
+        with self.assertRaisesRegex(ValueError, "smaller.*precision"):
+            calculate_plethystic_logarithm(
+                truncated_index,
+                4,
+                form_executable="missing-form-for-test",
+            )
+
+    def test_unit_index_does_not_invoke_form(self):
+        self.assertEqual(
+            calculate_plethystic_logarithm(
+                1, 4, form_executable="missing-form-for-test"
+            ),
+            0,
+        )
+        self.assertEqual(
+            extract_coulomb_branch_spectrum_from_index(
+                1, 4, form_executable="missing-form-for-test"
+            ),
+            (),
+        )
 
 
 if __name__ == "__main__":

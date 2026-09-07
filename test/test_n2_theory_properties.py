@@ -23,6 +23,15 @@ class TheoryPropertyTests(unittest.TestCase):
         )
         self.calculate_index_internal = index_patcher.start()
         self.addCleanup(index_patcher.stop)
+        coulomb_index_patcher = patch.object(
+            properties,
+            "calculate_lagrangian_coulomb_branch_index",
+            return_value="mock_coulomb_index",
+        )
+        self.calculate_lagrangian_coulomb_branch_index = (
+            coulomb_index_patcher.start()
+        )
+        self.addCleanup(coulomb_index_patcher.stop)
 
     def test_complex_conjugate_full_hypers_share_one_flavor_block(self):
         result = properties.calculate_n2_theory_properties(
@@ -147,6 +156,17 @@ class TheoryPropertyTests(unittest.TestCase):
                 "c": {"numerator": 22, "denominator": 1},
             },
         )
+        self.assertEqual(
+            result["coulomb_branch_spectrum"],
+            [
+                {"numerator": 2, "denominator": 1},
+                {"numerator": 5, "denominator": 1},
+                {"numerator": 6, "denominator": 1},
+                {"numerator": 8, "denominator": 1},
+                {"numerator": 9, "denominator": 1},
+                {"numerator": 12, "denominator": 1},
+            ],
+        )
 
     def test_public_central_charge_api_counts_half_hypers(self):
         central_charges = properties.calculate_central_charges(
@@ -178,11 +198,32 @@ class TheoryPropertyTests(unittest.TestCase):
                 }
             )
 
-    def test_deferred_properties_raise_not_implemented(self):
-        with self.assertRaises(NotImplementedError):
-            properties.calculate_coulomb_branch_spectrum({})
+    def test_public_coulomb_branch_index_uses_lagrangian_calculation(self):
+        result = properties.calculate_coulomb_branch_index(
+            {
+                "algebra": "A1",
+                "hypermultiplets": [
+                    {"representation": "fundamental", "number": 4}
+                ],
+            }
+        )
 
-    def test_superconformal_index_uses_singular_key_and_internal_calculation(self):
+        self.assertEqual(result, "mock_coulomb_index")
+        self.calculate_lagrangian_coulomb_branch_index.assert_called_once()
+
+    def test_public_coulomb_branch_spectrum_uses_gauge_factors(self):
+        result = properties.calculate_coulomb_branch_spectrum(
+            {
+                "algebra": "A2",
+                "hypermultiplets": [
+                    {"representation": "fundamental", "number": 6}
+                ],
+            }
+        )
+
+        self.assertEqual(result, (Fraction(2), Fraction(3)))
+
+    def test_indices_and_coulomb_spectrum_use_singular_keys(self):
         data = {
             "algebra": "A1",
             "hypermultiplets": [
@@ -192,6 +233,11 @@ class TheoryPropertyTests(unittest.TestCase):
 
         result = properties.calculate_n2_theory_properties(data)
 
+        self.assertEqual(result["coulomb_branch_index"], "mock_coulomb_index")
+        self.assertEqual(
+            result["coulomb_branch_spectrum"],
+            (Fraction(2),),
+        )
         self.assertEqual(result["superconformal_index"], "mock_index")
         self.assertNotIn("superconformal_indices", result)
         self.calculate_index_internal.assert_called_once()

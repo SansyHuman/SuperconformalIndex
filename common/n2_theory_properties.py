@@ -5,8 +5,7 @@ The input JSON schema is the same one accepted by
 ``anomalies.check_n2_anomalies``. The implemented properties are the connected
 continuous flavor symmetry at the massless point, the local complex dimension
 of the conformal manifold, the conformal central charges, and the
-superconformal index. The Coulomb-branch spectrum is reserved for later
-integration.
+superconformal index, Coulomb-branch index, and Coulomb-branch spectrum.
 """
 
 from __future__ import annotations
@@ -34,6 +33,10 @@ from anomalies.lie_algebra import (
     conjugate_dynkin_labels,
     get_lie_algebra,
 )
+from index.n2_theory_coulomb_branches import (
+    calculate_lagrangian_coulomb_branch_index,
+    coulomb_branch_spectrum_from_gauge_factors,
+)
 from index.n2_theory_index import calculate_index_internal
 
 if __package__:
@@ -44,6 +47,7 @@ else:
 RepresentationKey = tuple[tuple[str, DynkinLabels], ...]
 
 INDEX_MAX_ORDER = 18
+C_INDEX_MAX_ORDER = 90
 INDEX_CACHE_DIRECTORY = Path(__file__).resolve().parents[1] / "char_decomposition_cache"
 LIE_EXECUTABLE = "lie"
 FORM_EXECUTABLE = "form"
@@ -297,10 +301,10 @@ def _calculate_central_charges(
     return {"a": a, "c": c}
 
 
-def _calculate_superconformal_index(
+def _extract_gauge_factors(
     anomaly_result: dict[str, Any],
-) -> Any:
-    """Calculate the superconformal index."""
+) -> tuple[GaugeFactorData, ...]:
+    """Extract gauge factors from anomaly result."""
     if "gauge_factors" in anomaly_result:
         factors = tuple(
             GaugeFactorData(
@@ -314,6 +318,15 @@ def _calculate_superconformal_index(
                 "gauge", get_lie_algebra(anomaly_result["algebra"])
             ),
         )
+
+    return factors
+
+
+def _calculate_superconformal_index(
+    anomaly_result: dict[str, Any],
+) -> Any:
+    """Calculate the superconformal index."""
+    factors = _extract_gauge_factors(anomaly_result)
     hypermultiplets = anomaly_result["hypermultiplets"]
     return calculate_index_internal(
         factors,
@@ -324,6 +337,30 @@ def _calculate_superconformal_index(
         form_executable=FORM_EXECUTABLE,
         timeout=DEFAULT_TIMEOUT,
         processes=DEFAULT_PROCESS_COUNT,
+    )
+
+
+def _calculate_coulomb_branch_index(
+    anomaly_result: dict[str, Any]
+) -> Any:
+    """Calculate the Coulomb-branch index."""
+    factors = _extract_gauge_factors(anomaly_result)
+    return calculate_lagrangian_coulomb_branch_index(
+        factors,
+        C_INDEX_MAX_ORDER,
+        form_executable=FORM_EXECUTABLE,
+        timeout=DEFAULT_TIMEOUT,
+    )
+
+
+def _calculate_coulomb_branch_spectrum(
+    anomaly_result: dict[str, Any]
+) -> tuple[Fraction, ...]:
+    """Calculate the Coulomb-branch spectrum."""
+    factors = _extract_gauge_factors(anomaly_result)
+    return tuple(
+        Fraction(dim)
+        for dim in coulomb_branch_spectrum_from_gauge_factors(factors)
     )
 
 
@@ -357,6 +394,16 @@ def calculate_n2_theory_properties(data: dict[str, Any]) -> dict[str, Any]:
         if anomaly_result["lagrangian_scft_candidate"]
         else None
     )
+    coulomb_branch_index = (
+        str(_calculate_coulomb_branch_index(anomaly_result))
+        if anomaly_result["lagrangian_scft_candidate"]
+        else None
+    )
+    coulomb_branch_spectrum = (
+        _calculate_coulomb_branch_spectrum(anomaly_result)
+        if anomaly_result["lagrangian_scft_candidate"]
+        else None
+    )
     return {
         "group": anomaly_result["group"],
         "lagrangian_scft_candidate": anomaly_result[
@@ -366,7 +413,8 @@ def calculate_n2_theory_properties(data: dict[str, Any]) -> dict[str, Any]:
         "conformal_manifold_dimension": conformal_dimension,
         "exactly_marginal_gauge_couplings": marginal_couplings,
         "central_charges": central_charges,
-        "coulomb_branch_spectrum": None,
+        "coulomb_branch_index": coulomb_branch_index,
+        "coulomb_branch_spectrum": coulomb_branch_spectrum,
         "superconformal_index": superconformal_index,
     }
 
@@ -390,10 +438,22 @@ def calculate_central_charges(
     return _calculate_central_charges(anomaly_result)
 
 
-def calculate_coulomb_branch_spectrum(data: dict[str, Any]) -> Any:
-    raise NotImplementedError(
-        "the Coulomb-branch spectrum is not implemented in this module"
-    )
+def calculate_coulomb_branch_index(data: dict[str, Any]) -> Any:
+    """Calculate the Coulomb-branch index of a Lagrangian SCFT candidate."""
+    anomaly_result = _validated_anomaly_result(data)
+    if not anomaly_result["lagrangian_scft_candidate"]:
+        return None
+    return _calculate_coulomb_branch_index(anomaly_result)
+
+
+def calculate_coulomb_branch_spectrum(
+    data: dict[str, Any],
+) -> tuple[Fraction, ...] | None:
+    """Calculate the Coulomb spectrum of a Lagrangian SCFT candidate."""
+    anomaly_result = _validated_anomaly_result(data)
+    if not anomaly_result["lagrangian_scft_candidate"]:
+        return None
+    return _calculate_coulomb_branch_spectrum(anomaly_result)
 
 
 def calculate_superconformal_index(data: dict[str, Any]) -> Any:

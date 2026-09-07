@@ -49,7 +49,7 @@ from anomalies.check_n2_anomalies import (
 from anomalies.lie_algebra import conjugate_dynkin_labels
 
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 5
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -119,6 +119,7 @@ CREATE TABLE IF NOT EXISTS theory_properties (
                 0
             )
         ) STORED,
+    coulomb_branch_index_json JSON NULL,
     coulomb_branch_spectrum_json JSON NULL,
     superconformal_index_json JSON NULL,
     properties_json JSON NOT NULL,
@@ -341,6 +342,33 @@ SCHEMA_MIGRATIONS = {
             'one',
             '$.superconformal_indices'
         )
+        """,
+    ),
+    3: (
+        """
+        ALTER TABLE theory_properties
+            CHANGE COLUMN coulomb_branch_spectrum_json
+            coulomb_branch_index_json JSON NULL
+        """,
+        """
+        UPDATE theory_properties
+        SET properties_json = JSON_SET(
+            JSON_REMOVE(properties_json, '$.coulomb_branch_spectrum'),
+            '$.coulomb_branch_index',
+            JSON_EXTRACT(properties_json, '$.coulomb_branch_spectrum')
+        )
+        WHERE JSON_CONTAINS_PATH(
+            properties_json,
+            'one',
+            '$.coulomb_branch_spectrum'
+        )
+        """,
+    ),
+    4: (
+        """
+        ALTER TABLE theory_properties
+            ADD COLUMN coulomb_branch_spectrum_json JSON NULL
+            AFTER coulomb_branch_index_json
         """,
     ),
 }
@@ -575,6 +603,7 @@ def _shared_properties(properties: dict[str, Any]) -> dict[str, Any]:
             "conformal_manifold_dimension"
         ],
         "central_charges": properties["central_charges"],
+        "coulomb_branch_index": properties["coulomb_branch_index"],
         "coulomb_branch_spectrum": properties[
             "coulomb_branch_spectrum"
         ],
@@ -653,6 +682,26 @@ def _insert_shared_properties(
         existing_properties = existing["properties_json"]
         if isinstance(existing_properties, str):
             existing_properties = json.loads(existing_properties)
+        legacy_properties = dict(normalized_shared)
+        legacy_properties.pop("coulomb_branch_spectrum")
+        if existing_properties == legacy_properties:
+            _execute(
+                connection,
+                """
+                UPDATE theory_properties
+                SET coulomb_branch_spectrum_json = %s,
+                    properties_json = %s
+                WHERE theory_id = %s
+                """,
+                (
+                    _optional_json_text(
+                        properties["coulomb_branch_spectrum"]
+                    ),
+                    serialized,
+                    theory_id,
+                ),
+            )
+            return
         if existing_properties != normalized_shared:
             raise ValueError(
                 f"theory {theory_id} already has different shared properties"
@@ -670,11 +719,12 @@ def _insert_shared_properties(
             flavor_dimension,
             conformal_manifold_dimension,
             central_charges_json,
+            coulomb_branch_index_json,
             coulomb_branch_spectrum_json,
             superconformal_index_json,
             properties_json
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             theory_id,
@@ -683,6 +733,7 @@ def _insert_shared_properties(
             flavor["dimension"],
             properties["conformal_manifold_dimension"],
             _optional_json_text(properties["central_charges"]),
+            _optional_json_text(properties["coulomb_branch_index"]),
             _optional_json_text(properties["coulomb_branch_spectrum"]),
             _optional_json_text(properties["superconformal_index"]),
             serialized,

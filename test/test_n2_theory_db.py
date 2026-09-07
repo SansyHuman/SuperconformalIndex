@@ -85,6 +85,12 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
         )
         index_patcher.start()
         self.addCleanup(index_patcher.stop)
+        coulomb_index_patcher = patch(
+            "common.n2_theory_properties.calculate_lagrangian_coulomb_branch_index",
+            return_value="mock_coulomb_index",
+        )
+        coulomb_index_patcher.start()
+        self.addCleanup(coulomb_index_patcher.stop)
 
     def test_schema_uses_mysql_types_and_innodb(self):
         self.assertIn("AUTO_INCREMENT", database.SCHEMA_SQL)
@@ -102,6 +108,12 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
         self.assertIn(
             "idx_theory_properties_central_charge_a",
             database.SCHEMA_SQL,
+        )
+        self.assertIn(
+            "coulomb_branch_index_json JSON NULL", database.SCHEMA_SQL
+        )
+        self.assertIn(
+            "coulomb_branch_spectrum_json JSON NULL", database.SCHEMA_SQL
         )
         self.assertIn("superconformal_index_json JSON NULL", database.SCHEMA_SQL)
         self.assertNotIn("superconformal_indices_json", database.SCHEMA_SQL)
@@ -131,7 +143,7 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
             for statement, parameters in connection.statements
             if "INSERT INTO schema_metadata" in statement
         )
-        self.assertEqual(metadata_parameters, ("schema_version", "3"))
+        self.assertEqual(metadata_parameters, ("schema_version", "5"))
 
     def test_initialize_database_migrates_version_one_schema(self):
         connection = _RecordingConnection(
@@ -148,6 +160,7 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
         self.assertIn("central_charge_a_decimal", migrations[0])
         self.assertIn("central_charge_c_decimal", migrations[0])
         self.assertIn("superconformal_index_json", migrations[1])
+        self.assertIn("coulomb_branch_index_json", migrations[2])
         metadata_parameters = [
             parameters
             for statement, parameters in connection.statements
@@ -155,7 +168,12 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
         ]
         self.assertEqual(
             metadata_parameters,
-            [("2", "schema_version"), ("3", "schema_version")],
+            [
+                ("2", "schema_version"),
+                ("3", "schema_version"),
+                ("4", "schema_version"),
+                ("5", "schema_version"),
+            ],
         )
 
     def test_initialize_database_migrates_version_two_schema(self):
@@ -180,6 +198,57 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
                 for statement in statements
             )
         )
+
+    def test_initialize_database_migrates_version_three_schema(self):
+        connection = _RecordingConnection(
+            select_rows=[{"metadata_value": "3"}]
+        )
+
+        database.initialize_database(connection)
+
+        statements = [statement for statement, _ in connection.statements]
+        rename = next(
+            statement
+            for statement in statements
+            if statement.startswith("ALTER TABLE theory_properties")
+        )
+        self.assertIn("coulomb_branch_spectrum_json", rename)
+        self.assertIn("coulomb_branch_index_json", rename)
+        self.assertTrue(
+            any(
+                statement.startswith("UPDATE theory_properties")
+                and "$.coulomb_branch_index" in statement
+                for statement in statements
+            )
+        )
+        self.assertTrue(
+            any(
+                statement.startswith("ALTER TABLE theory_properties")
+                and "ADD COLUMN coulomb_branch_spectrum_json" in statement
+                for statement in statements
+            )
+        )
+
+    def test_initialize_database_migrates_version_four_schema(self):
+        connection = _RecordingConnection(
+            select_rows=[{"metadata_value": "4"}]
+        )
+
+        database.initialize_database(connection)
+
+        statements = [statement for statement, _ in connection.statements]
+        migration = next(
+            statement
+            for statement in statements
+            if statement.startswith("ALTER TABLE theory_properties")
+        )
+        self.assertIn("ADD COLUMN coulomb_branch_spectrum_json", migration)
+        metadata_parameters = next(
+            parameters
+            for statement, parameters in connection.statements
+            if statement.startswith("UPDATE schema_metadata")
+        )
+        self.assertEqual(metadata_parameters, ("5", "schema_version"))
 
     def test_connect_database_uses_pymysql_options(self):
         connection = MagicMock()
@@ -305,6 +374,33 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
         self.assertEqual(len(connection.statements), 1)
         self.assertTrue(connection.statements[0][0].startswith("SELECT"))
 
+    def test_existing_properties_without_spectrum_are_backfilled(self):
+        _, properties = database._checked_results(E6_SCFT)
+        legacy_shared = database._shared_properties(properties)
+        legacy_shared.pop("coulomb_branch_spectrum")
+        connection = _RecordingConnection(
+            select_rows=[
+                {"properties_json": database._json_text(legacy_shared)}
+            ]
+        )
+
+        database._insert_shared_properties(
+            connection, theory_id=3, properties=properties
+        )
+
+        self.assertEqual(len(connection.statements), 2)
+        update, parameters = connection.statements[1]
+        self.assertTrue(update.startswith("UPDATE theory_properties"))
+        self.assertEqual(json.loads(parameters[0]), [
+            {"numerator": 2, "denominator": 1},
+            {"numerator": 5, "denominator": 1},
+            {"numerator": 6, "denominator": 1},
+            {"numerator": 8, "denominator": 1},
+            {"numerator": 9, "denominator": 1},
+            {"numerator": 12, "denominator": 1},
+        ])
+        self.assertEqual(parameters[2], 3)
+
     def test_shared_properties_store_exact_central_charge_fractions(self):
         _, properties = database._checked_results(E6_SCFT)
         connection = _RecordingConnection()
@@ -323,13 +419,29 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
             "c": {"numerator": 22, "denominator": 1},
         }
         self.assertEqual(json.loads(parameters[5]), expected)
-        self.assertEqual(json.loads(parameters[7]), "mock_index")
-        shared_properties = json.loads(parameters[8])
+        self.assertEqual(json.loads(parameters[6]), "mock_coulomb_index")
+        expected_spectrum = [
+            {"numerator": 2, "denominator": 1},
+            {"numerator": 5, "denominator": 1},
+            {"numerator": 6, "denominator": 1},
+            {"numerator": 8, "denominator": 1},
+            {"numerator": 9, "denominator": 1},
+            {"numerator": 12, "denominator": 1},
+        ]
+        self.assertEqual(json.loads(parameters[7]), expected_spectrum)
+        self.assertEqual(json.loads(parameters[8]), "mock_index")
+        shared_properties = json.loads(parameters[9])
         self.assertEqual(
             shared_properties["central_charges"], expected
         )
         self.assertEqual(
             shared_properties["superconformal_index"], "mock_index"
+        )
+        self.assertEqual(
+            shared_properties["coulomb_branch_index"], "mock_coulomb_index"
+        )
+        self.assertEqual(
+            shared_properties["coulomb_branch_spectrum"], expected_spectrum
         )
         self.assertNotIn("superconformal_indices", shared_properties)
 
