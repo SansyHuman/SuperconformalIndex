@@ -6,7 +6,6 @@ from functools import reduce
 from math import gcd
 from operator import index
 from sympy.liealgebras import root_system
-import sympy
 
 from ortools.sat.python import cp_model
 

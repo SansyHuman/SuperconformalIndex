@@ -1,3 +1,5 @@
+"""Number conversion helpers."""
+
 import re
 from fractions import Fraction
 from typing import Any
@@ -23,10 +25,14 @@ def as_nonnegative_fraction(value: Any, field_name: str) -> Fraction:
 
     try:
         result = Fraction(value)
+        if not isinstance(result.numerator, int) or not isinstance(
+            result.denominator, int
+        ):
+            result = Fraction(str(value))
     except (TypeError, ValueError, ZeroDivisionError, OverflowError):
         try:
             result = Fraction(str(value))
-        except (ValueError, ZeroDivisionError) as exc:
+        except (TypeError, ValueError, ZeroDivisionError, OverflowError) as exc:
             raise ValueError(
                 f"{field_name} must be an exact nonnegative rational"
             ) from exc

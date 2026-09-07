@@ -4,6 +4,8 @@ import shutil
 import sys
 import unittest
 
+from sage.all import QQ
+
 
 PROJECT_ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -49,6 +51,16 @@ class CoulombBranchPlethysticTests(unittest.TestCase):
         self.assertEqual(
             result,
             1 + x ** Fraction(6, 5) + x ** Fraction(12, 5) + x ** Fraction(18, 5),
+        )
+
+    def test_sage_exact_dimensions(self):
+        result = calculate_coulomb_branch_index(
+            [QQ(6) / 5], QQ(12) / 5
+        )
+        x = COULOMB_INDEX_RING.gen()
+        self.assertEqual(
+            result,
+            1 + x ** Fraction(6, 5) + x ** Fraction(12, 5),
         )
 
     def test_spectrum_multiplicity_mapping(self):

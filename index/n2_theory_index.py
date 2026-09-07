@@ -19,9 +19,7 @@ from fractions import Fraction
 import json
 from pathlib import Path
 import re
-import subprocess
 import sys
-import tempfile
 from typing import Any
 
 if not __package__:
@@ -40,11 +38,12 @@ from anomalies.lie_algebra import (
     conjugate_dynkin_labels,
     get_lie_algebra,
 )
+from common.form_utils import run_form, split_signed_terms, split_top_level
+from common.number_utils import as_nonnegative_int
 from index.char_decomposition_cache import (
     AdamsPowers,
     CharacterDecompositionCache,
 )
-from common.number_utils import as_nonnegative_int
 
 
 # A pair (gauge factor position, highest weight of representation)
@@ -235,87 +234,6 @@ Print result;
 """
 
 
-def _run_form(
-    program: str,
-    *,
-    form_executable: str,
-    timeout: float,
-) -> str:
-    """Run one FORM program in an isolated writable temporary directory."""
-    try:
-        with tempfile.TemporaryDirectory(prefix="n2-index-form-") as directory:
-            script = Path(directory) / "index.frm"
-            script.write_text(program, encoding="utf-8")
-            result = subprocess.run(
-                [form_executable, "-q", str(script)],
-                cwd=directory,
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
-    except FileNotFoundError as exc:
-        raise RuntimeError(
-            f"FORM executable {form_executable!r} was not found"
-        ) from exc
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError("FORM calculation timed out") from exc
-
-    if result.returncode != 0 or result.stderr.strip():
-        raise RuntimeError(
-            f"FORM failed with code {result.returncode}: "
-            f"{result.stderr.strip() or result.stdout.strip()}"
-        )
-    return result.stdout
-
-
-def _split_top_level(expression: str, separator: str) -> list[str]:
-    """Split on one character outside function arguments and exponent signs."""
-    result: list[str] = []
-    start = 0
-    depth = 0
-    for position, character in enumerate(expression):
-        if character == "(":
-            depth += 1
-        elif character == ")":
-            depth -= 1
-        elif (
-            character == separator
-            and depth == 0
-            and not (
-                separator in "+-"
-                and position > 0
-                and expression[position - 1] == "^"
-            )
-        ):
-            result.append(expression[start:position])
-            start = position + 1
-    result.append(expression[start:])
-    return result
-
-
-def _split_signed_terms(expression: str) -> list[str]:
-    """Split a flat FORM sum while preserving each monomial's sign."""
-    result: list[str] = []
-    start = 0
-    depth = 0
-    for position, character in enumerate(expression):
-        if character == "(":
-            depth += 1
-        elif character == ")":
-            depth -= 1
-        elif (
-            position > start
-            and depth == 0
-            and character in "+-"
-            and expression[position - 1] != "^"
-        ):
-            result.append(expression[start:position])
-            start = position
-    result.append(expression[start:])
-    return [term for term in result if term]
-
-
 def _canonical_character_powers(raw: dict[int, int]) -> AdamsPowers:
     """Convert a mapping from Adams operation index to power to one formal character."""
     order = sum(adams * exponent for adams, exponent in raw.items())
@@ -334,7 +252,7 @@ def _parse_form_output(output: str) -> list[FormTerm]:
         raise RuntimeError("FORM returned an empty result")
 
     terms: list[FormTerm] = []
-    for raw_term in _split_signed_terms(expression):
+    for raw_term in split_signed_terms(expression):
         sign = 1
         if raw_term.startswith("+"):
             raw_term = raw_term[1:]
@@ -345,7 +263,7 @@ def _parse_form_output(output: str) -> list[FormTerm]:
         coefficient = Fraction(sign)
         powers = {"t": 0, "y": 0, "u": 0}
         characters: dict[int, dict[int, int]] = {}
-        for factor in _split_top_level(raw_term, "*"):
+        for factor in split_top_level(raw_term, "*"):
             if match := _RATIONAL_RE.fullmatch(factor):
                 coefficient *= Fraction(int(match.group(1)), int(match.group(2)))
             elif match := _CHARACTER_RE.fullmatch(factor):
@@ -549,7 +467,7 @@ def calculate_index_internal(
         vector_characters,
         matter_multiplicities,
     )
-    form_output = _run_form(
+    form_output = run_form(
         program,
         form_executable=form_executable,
         timeout=timeout,
