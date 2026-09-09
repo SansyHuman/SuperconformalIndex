@@ -68,7 +68,7 @@ class _FlavorBlock:
 def _canonical_complex_key(
     key: RepresentationKey, factor_algebras: dict[str, str]
 ) -> RepresentationKey:
-    """Select one of the original and conjugate representations."""
+    """Prefer lower-numbered Dynkin nodes under simultaneous conjugation."""
     conjugate_key = tuple(
         (
             factor_id,
@@ -76,7 +76,7 @@ def _canonical_complex_key(
         )
         for factor_id, labels in key
     )
-    return min(key, conjugate_key)
+    return max(key, conjugate_key)
 
 
 def _add_flavor_block(

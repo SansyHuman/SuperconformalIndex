@@ -11,8 +11,8 @@ Scope
   four-manifolds.
 * Pure 't Hooft anomalies of ungauged flavor symmetries are intentionally not
   required to vanish.
-* SageMath supplies Cartan/root data, Weyl-character dimensions and duals,
-  and Frobenius-Schur reality indicators. Casimirs and indices remain exact.
+* SageMath supplies Cartan/root data, Weyl-character dimensions and duals.
+  Reality uses Tits' formula; coroot pairings, Casimirs and indices are exact.
 
 Input is a JSON file of the form
 

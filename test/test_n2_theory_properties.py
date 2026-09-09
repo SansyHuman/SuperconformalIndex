@@ -46,11 +46,64 @@ class TheoryPropertyTests(unittest.TestCase):
         self.assertTrue(result["lagrangian_scft_candidate"])
         self.assertEqual(result["flavor_symmetry"]["connected_group"], "U(6)")
         self.assertEqual(result["flavor_symmetry"]["dimension"], 36)
+        self.assertEqual(
+            result["flavor_symmetry"]["factors"][0]["gauge_representation"]
+            ["gauge"]["dynkin_labels"],
+            [1, 0],
+        )
         self.assertEqual(result["conformal_manifold_dimension"], 1)
         self.assertEqual(
             result["central_charges"],
             {"a": Fraction(29, 12), "c": Fraction(17, 6)},
         )
+
+    def test_complex_flavor_blocks_prefer_lower_dynkin_nodes(self):
+        cases = (
+            ("A4", (1, 0, 0, 0), (0, 0, 0, 1)),
+            ("D5", (0, 0, 0, 1, 0), (0, 0, 0, 0, 1)),
+            ("E6", (1, 0, 0, 0, 0, 0), (0, 0, 0, 0, 0, 1)),
+        )
+        for algebra, preferred, conjugate in cases:
+            for labels in (preferred, conjugate):
+                with self.subTest(algebra=algebra, labels=labels):
+                    result = properties.calculate_n2_theory_properties({
+                        "algebra": algebra,
+                        "hypermultiplets": [{"dynkin_labels": labels}],
+                    })
+                    representation = result["flavor_symmetry"]["factors"][0][
+                        "gauge_representation"
+                    ]["gauge"]
+                    self.assertEqual(representation["dynkin_labels"], list(preferred))
+
+    def test_product_flavor_blocks_use_only_simultaneous_conjugation(self):
+        fundamental, antifundamental = (1, 0), (0, 1)
+        canonical_representations = set()
+        for left, right, expected in (
+            (fundamental, fundamental, (fundamental, fundamental)),
+            (antifundamental, antifundamental, (fundamental, fundamental)),
+            (fundamental, antifundamental, (fundamental, antifundamental)),
+            (antifundamental, fundamental, (fundamental, antifundamental)),
+        ):
+            with self.subTest(left=left, right=right):
+                result = properties.calculate_n2_theory_properties({
+                    "gauge_groups": [
+                        {"id": "left", "algebra": "A2"},
+                        {"id": "right", "algebra": "A2"},
+                    ],
+                    "hypermultiplets": [{
+                        "representations": {"left": list(left), "right": list(right)},
+                        "number": 2,
+                    }],
+                })
+                block = result["flavor_symmetry"]["factors"][0]
+                self.assertEqual(block["group"], "U(2)")
+                representation = tuple(
+                    tuple(block["gauge_representation"][factor]["dynkin_labels"])
+                    for factor in ("left", "right")
+                )
+                self.assertEqual(representation, expected)
+                canonical_representations.add(representation)
+        self.assertEqual(len(canonical_representations), 2)
 
     def test_real_bifundamentals_have_symplectic_flavor(self):
         result = properties.calculate_n2_theory_properties(

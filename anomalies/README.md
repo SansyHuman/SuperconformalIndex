@@ -59,11 +59,12 @@ classical families additionally support their applicable `vector`, `spinor`,
 fundamental weight number `k` directly.
 
 SageMath's `CartanType`, `RootSystem`, and `WeylCharacterRing` provide the root
-data, dual Coxeter numbers, representation dimensions and duals, and
-Frobenius-Schur indicators. The checker uses these to compute exact quadratic
-Casimirs and Dynkin indices. It then checks representation validity, the
-perturbative gauge anomaly implied by N=2 hypermultiplets, the conventional
-mod-two Witten anomaly for `A1` and `C_r` (including the isomorphic `B2` case),
+data, dual Coxeter numbers, representation dimensions and duals. Reality is
+determined by Tits' formula using exact coroot pairings cached per algebra,
+without computing symmetric or exterior squares. The checker also computes
+exact quadratic Casimirs and Dynkin indices. It then checks representation
+validity, the perturbative gauge anomaly implied by N=2 hypermultiplets, the
+conventional mod-two Witten anomaly for `A1` and `C_r` (including the isomorphic `B2` case),
 and each factor's one-loop N=2 beta function. Pure flavor anomalies and global
 anomalies that depend on a non-simply-connected quotient are not tested.
 

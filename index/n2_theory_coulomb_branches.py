@@ -24,8 +24,8 @@ generated Coulomb-branch spectrum.
 The inverse direction is implemented by
 :func:`calculate_plethystic_logarithm`, which evaluates the ordinary
 logarithm with FORM and applies the exact Moebius transform.  The stricter
-:func:`extract_coulomb_branch_spectrum` interprets its nonnegative integral
-coefficients as repeated generator dimensions.
+:func:`extract_coulomb_branch_spectrum_from_index` interprets its nonnegative
+integral coefficients as repeated generator dimensions.
 """
 
 from __future__ import annotations

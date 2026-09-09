@@ -49,7 +49,7 @@ from anomalies.check_n2_anomalies import (
 from anomalies.lie_algebra import conjugate_dynkin_labels
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -246,8 +246,6 @@ CREATE TABLE IF NOT EXISTS flavor_symmetry_factors (
     dimension BIGINT UNSIGNED NOT NULL,
     representation_reality
         ENUM('real', 'pseudoreal', 'complex') NOT NULL,
-    full_hypermultiplets BIGINT UNSIGNED NOT NULL,
-    half_hypermultiplets BIGINT UNSIGNED NOT NULL,
     half_hyper_units BIGINT UNSIGNED NOT NULL,
     gauge_representation_json JSON NOT NULL,
     PRIMARY KEY (id),
@@ -369,6 +367,13 @@ SCHEMA_MIGRATIONS = {
         ALTER TABLE theory_properties
             ADD COLUMN coulomb_branch_spectrum_json JSON NULL
             AFTER coulomb_branch_index_json
+        """,
+    ),
+    5: (
+        """
+        ALTER TABLE flavor_symmetry_factors
+            DROP COLUMN full_hypermultiplets,
+            DROP COLUMN half_hypermultiplets
         """,
     ),
 }
@@ -538,6 +543,7 @@ def _canonical_representation(
     factor_rows: list[dict[str, Any]],
     representations: dict[str, Any],
 ) -> tuple[tuple[int, ...], ...]:
+    """Prefer lower-numbered Dynkin nodes under simultaneous conjugation."""
     labels = tuple(
         tuple(representations[factor["id"]].labels) for factor in factor_rows
     )
@@ -545,14 +551,34 @@ def _canonical_representation(
         conjugate_dynkin_labels(factor["algebra"], factor_labels)
         for factor, factor_labels in zip(factor_rows, labels)
     )
-    return min(labels, conjugate)
+    return max(labels, conjugate)
 
 
 def _canonical_lagrangian_payload(
     anomaly_result: dict[str, Any],
 ) -> dict[str, Any]:
+    """Identify conjugates and pair pseudoreal half hypers into full hypers.
+
+    Pair only after aggregating each complete gauge representation, leaving
+    one half hyper when its total half-hyper multiplicity is odd. This keeps
+    the previous payload for inputs written entirely in full hypers.
+    """
     factor_rows = _factor_rows(anomaly_result)
     aggregated: dict[tuple[str, tuple[tuple[int, ...], ...]], int] = {}
+    pseudoreal_units: dict[tuple[tuple[int, ...], ...], int] = {}
+
+    def add_hyper(
+        kind: str,
+        labels: tuple[tuple[int, ...], ...],
+        number: int,
+        reality: str,
+    ) -> None:
+        if reality == "pseudoreal":
+            units = number * (2 if kind == "full" else 1)
+            pseudoreal_units[labels] = pseudoreal_units.get(labels, 0) + units
+        else:
+            key = (kind, labels)
+            aggregated[key] = aggregated.get(key, 0) + number
 
     if "gauge_factors" in anomaly_result:
         hypers: list[ProductHyperData] = anomaly_result["hypermultiplets"]
@@ -562,8 +588,7 @@ def _canonical_lagrangian_payload(
             labels = _canonical_representation(
                 factor_rows, hyper.representations
             )
-            key = (hyper.kind, labels)
-            aggregated[key] = aggregated.get(key, 0) + hyper.number
+            add_hyper(hyper.kind, labels, hyper.number, hyper.reality)
     else:
         hypers: list[HyperData] = anomaly_result["hypermultiplets"]
         algebra = factor_rows[0]["algebra"]
@@ -572,8 +597,17 @@ def _canonical_lagrangian_payload(
                 continue
             labels = tuple(hyper.representation.labels)
             conjugate = conjugate_dynkin_labels(algebra, labels)
-            key = (hyper.kind, (min(labels, conjugate),))
-            aggregated[key] = aggregated.get(key, 0) + hyper.number
+            add_hyper(
+                hyper.kind, (max(labels, conjugate),), hyper.number,
+                hyper.representation.reality,
+            )
+
+    for labels, units in pseudoreal_units.items():
+        full, half = divmod(units, 2)
+        if full:
+            aggregated[("full", labels)] = full
+        if half:
+            aggregated[("half", labels)] = half
 
     canonical_hypers = [
         {
@@ -596,9 +630,23 @@ def _canonical_hash(anomaly_result: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _shared_flavor_symmetry(flavor: dict[str, Any]) -> dict[str, Any]:
+    """Keep physical multiplicities without the realization's full/half split."""
+    return {
+        **flavor,
+        "factors": [
+            {
+                key: value for key, value in factor.items()
+                if key not in {"full_hypermultiplets", "half_hypermultiplets"}
+            }
+            for factor in flavor["factors"]
+        ],
+    }
+
+
 def _shared_properties(properties: dict[str, Any]) -> dict[str, Any]:
     return {
-        "flavor_symmetry": properties["flavor_symmetry"],
+        "flavor_symmetry": _shared_flavor_symmetry(properties["flavor_symmetry"]),
         "conformal_manifold_dimension": properties[
             "conformal_manifold_dimension"
         ],
@@ -682,9 +730,20 @@ def _insert_shared_properties(
         existing_properties = existing["properties_json"]
         if isinstance(existing_properties, str):
             existing_properties = json.loads(existing_properties)
+        # Older JSON may retain the split even after the schema upgrade.
+        comparable_properties = {
+            **existing_properties,
+            "flavor_symmetry": _shared_flavor_symmetry(
+                existing_properties["flavor_symmetry"]
+            ),
+        }
         legacy_properties = dict(normalized_shared)
         legacy_properties.pop("coulomb_branch_spectrum")
-        if existing_properties == legacy_properties:
+        if comparable_properties not in (normalized_shared, legacy_properties):
+            raise ValueError(
+                f"theory {theory_id} already has different shared properties"
+            )
+        if existing_properties != normalized_shared:
             _execute(
                 connection,
                 """
@@ -702,13 +761,9 @@ def _insert_shared_properties(
                 ),
             )
             return
-        if existing_properties != normalized_shared:
-            raise ValueError(
-                f"theory {theory_id} already has different shared properties"
-            )
         return
 
-    flavor = properties["flavor_symmetry"]
+    flavor = shared["flavor_symmetry"]
     _execute(
         connection,
         """
@@ -751,12 +806,10 @@ def _insert_shared_properties(
                 lie_rank,
                 dimension,
                 representation_reality,
-                full_hypermultiplets,
-                half_hypermultiplets,
                 half_hyper_units,
                 gauge_representation_json
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 theory_id,
@@ -766,8 +819,6 @@ def _insert_shared_properties(
                 factor["rank"],
                 factor["dimension"],
                 factor["representation_reality"],
-                factor["full_hypermultiplets"],
-                factor["half_hypermultiplets"],
                 factor["half_hyper_units"],
                 _json_text(factor["gauge_representation"]),
             ),

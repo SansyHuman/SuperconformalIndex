@@ -337,19 +337,43 @@ def dynkin_index(
     )
 
 
+@lru_cache(maxsize=None)
+def _tits_parities(algebra: SimpleLieAlgebra) -> tuple[int, ...]:
+    """Cache <omega_i, 2 rho^vee> modulo two for each fundamental weight."""
+    space = algebra.weight_space
+    # Coroots, rather than roots, are essential for non-simply-laced types.
+    two_rho_dual = sum(
+        (2 * root / root.scalar(root) for root in space.positive_roots()),
+        space.zero(),
+    )
+    fundamental_weights = space.fundamental_weights()
+    return tuple(
+        as_integer(
+            fundamental_weights[index].scalar(two_rho_dual),
+            "Tits parity exponent",
+        ) % 2
+        for index in algebra.index_set
+    )
+
+
 def representation_reality(
     algebra: SimpleLieAlgebra | str, labels: Iterable[Any]
 ) -> str:
-    """Classify an irrep using Sage's Frobenius-Schur indicator."""
+    """Classify an irrep by Tits' formula without computing tensor squares.
+
+    Non-self-dual irreps are complex. For a self-dual highest weight lambda,
+    the Frobenius-Schur indicator is (-1)^<lambda, 2 rho^vee>, where rho^vee
+    is half the sum of positive coroots. Even exponents give real irreps;
+    odd exponents give pseudoreal irreps. All pairings use exact arithmetic.
+
+    See Theorem 3.6 of https://arxiv.org/abs/0704.0165.
+    """
     algebra = _coerce_algebra(algebra)
-    _, character = _irrep(algebra, labels)
-    indicator = as_integer(
-        character.frobenius_schur_indicator(),
-        "Frobenius-Schur indicator",
-    )
-    try:
-        return {-1: "pseudoreal", 0: "complex", 1: "real"}[indicator]
-    except KeyError as exc:
-        raise ArithmeticError(
-            f"unexpected Frobenius-Schur indicator {indicator}"
-        ) from exc
+    validated = validate_dynkin_labels(algebra, labels)
+    if validated != conjugate_dynkin_labels(algebra, validated):
+        return "complex"
+    parity = sum(
+        label * coefficient
+        for label, coefficient in zip(validated, _tits_parities(algebra))
+    ) % 2
+    return "pseudoreal" if parity else "real"

@@ -1,8 +1,11 @@
+from copy import deepcopy
 from decimal import Decimal
 import json
 import os
 from pathlib import Path
+import shutil
 import sys
+import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -11,6 +14,7 @@ PROJECT_ROOT = Path(__file__).parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from common import n2_theory_db as database
+from common import n2_theory_properties as theory_properties
 
 
 E6_SCFT = {
@@ -35,6 +39,29 @@ A1_PRODUCT_SCFT = {
         }
     ],
 }
+
+
+def _pseudoreal_matter(*blocks, product=False):
+    if product:
+        return {
+            "gauge_groups": [
+                {"id": key, "algebra": "A1"} for key in ("a", "b", "c")
+            ],
+            "hypermultiplets": [
+                {
+                    "representations": dict.fromkeys(("a", "b", "c"), "fundamental"),
+                    "kind": kind, "number": number,
+                }
+                for kind, number in blocks
+            ],
+        }
+    return {
+        "algebra": "A1",
+        "hypermultiplets": [
+            {"representation": "fundamental", "kind": kind, "number": number}
+            for kind, number in blocks
+        ],
+    }
 
 
 class _RecordingCursor:
@@ -92,6 +119,61 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
         coulomb_index_patcher.start()
         self.addCleanup(coulomb_index_patcher.stop)
 
+    def test_simple_conjugate_hashes_prefer_lower_dynkin_nodes(self):
+        cases = (
+            ("A2", (1, 0), (0, 1)),
+            ("A4", (1, 0, 0, 0), (0, 0, 0, 1)),
+            ("D5", (0, 0, 0, 1, 0), (0, 0, 0, 0, 1)),
+            ("E6", (1, 0, 0, 0, 0, 0), (0, 0, 0, 0, 0, 1)),
+        )
+        for algebra, preferred, conjugate in cases:
+            hashes = set()
+            for labels in (preferred, conjugate):
+                with self.subTest(algebra=algebra, labels=labels):
+                    checked = database.check_input_data({
+                        "algebra": algebra,
+                        "hypermultiplets": [{"dynkin_labels": labels}],
+                    })
+                    payload = database._canonical_lagrangian_payload(checked)
+                    self.assertEqual(
+                        payload["hypermultiplets"][0]["dynkin_labels"],
+                        [list(preferred)],
+                    )
+                    hashes.add(database._canonical_hash(checked))
+            self.assertEqual(len(hashes), 1)
+
+    def test_product_conjugate_hashes_preserve_distinct_bifundamentals(self):
+        fundamental, antifundamental = (1, 0), (0, 1)
+        hashes_by_representation = {}
+        for left, right, expected in (
+            (fundamental, fundamental, (fundamental, fundamental)),
+            (antifundamental, antifundamental, (fundamental, fundamental)),
+            (fundamental, antifundamental, (fundamental, antifundamental)),
+            (antifundamental, fundamental, (fundamental, antifundamental)),
+        ):
+            with self.subTest(left=left, right=right):
+                checked = database.check_input_data({
+                    "gauge_groups": [
+                        {"id": "left", "algebra": "A2"},
+                        {"id": "right", "algebra": "A2"},
+                    ],
+                    "hypermultiplets": [{
+                        "representations": {"left": list(left), "right": list(right)},
+                        "number": 2,
+                    }],
+                })
+                payload = database._canonical_lagrangian_payload(checked)
+                self.assertEqual(
+                    payload["hypermultiplets"][0]["dynkin_labels"],
+                    [list(labels) for labels in expected],
+                )
+                hashes_by_representation.setdefault(expected, set()).add(
+                    database._canonical_hash(checked)
+                )
+        self.assertEqual(len(hashes_by_representation), 2)
+        self.assertTrue(all(len(hashes) == 1 for hashes in hashes_by_representation.values()))
+        self.assertEqual(len(set().union(*hashes_by_representation.values())), 2)
+
     def test_schema_uses_mysql_types_and_innodb(self):
         self.assertIn("AUTO_INCREMENT", database.SCHEMA_SQL)
         self.assertIn("ENGINE=InnoDB", database.SCHEMA_SQL)
@@ -119,6 +201,212 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
         self.assertNotIn("superconformal_indices_json", database.SCHEMA_SQL)
         self.assertNotIn("AUTOINCREMENT", database.SCHEMA_SQL)
         self.assertNotIn("CREATE INDEX IF NOT EXISTS", database.SCHEMA_SQL)
+        self.assertNotIn("full_hypermultiplets", database.SCHEMA_SQL)
+        self.assertNotIn("half_hypermultiplets", database.SCHEMA_SQL)
+        self.assertIn("half_hyper_units BIGINT UNSIGNED NOT NULL", database.SCHEMA_SQL)
+
+    def test_pseudoreal_hash_ignores_full_half_split(self):
+        cases = (
+            (False, 4, [("full", 2), ("half", 3), ("half", 1)]),
+            (True, 1, [("half", 1), ("half", 1)]),
+        )
+        for product, number, split in cases:
+            hashes = set()
+            for blocks in (
+                [("full", number)], [("half", 2 * number)], split,
+                list(reversed(split)) + [("full", 0)],
+            ):
+                with self.subTest(product=product, blocks=blocks):
+                    data = _pseudoreal_matter(*blocks, product=product)
+                    original = deepcopy(data)
+                    checked = database.check_input_data(data)
+                    self.assertTrue(checked["lagrangian_scft_candidate"])
+                    payload = database._canonical_lagrangian_payload(checked)
+                    self.assertEqual(payload["hypermultiplets"], [{
+                        "kind": "full", "number": number,
+                        "dynkin_labels": [[1]] * (3 if product else 1),
+                    }])
+                    hashes.add(database._canonical_hash(checked))
+                    self.assertEqual(data, original)
+            self.assertEqual(len(hashes), 1)
+
+    def test_odd_half_hypers_are_paired_within_each_representation(self):
+        hashes = set()
+        for fundamental in (
+            [{"dynkin_labels": [1, 0, 0], "kind": "half", "number": 11}],
+            [
+                {"dynkin_labels": [1, 0, 0], "kind": "full", "number": 5},
+                {"dynkin_labels": [1, 0, 0], "kind": "half", "number": 1},
+            ],
+        ):
+            checked = database.check_input_data({
+                "algebra": "C3",
+                "hypermultiplets": fundamental + [
+                    {"dynkin_labels": [0, 0, 1], "kind": "half", "number": 1}
+                ],
+            })
+            self.assertTrue(checked["lagrangian_scft_candidate"])
+            self.assertEqual(
+                database._canonical_lagrangian_payload(checked)["hypermultiplets"],
+                [
+                    {"kind": "full", "dynkin_labels": [[1, 0, 0]], "number": 5},
+                    {"kind": "half", "dynkin_labels": [[0, 0, 1]], "number": 1},
+                    {"kind": "half", "dynkin_labels": [[1, 0, 0]], "number": 1},
+                ],
+            )
+            hashes.add(database._canonical_hash(checked))
+        self.assertEqual(len(hashes), 1)
+
+    def test_real_product_representation_remains_full(self):
+        checked = database.check_input_data(A1_PRODUCT_SCFT)
+        self.assertEqual(checked["hypermultiplets"][0].reality, "real")
+        self.assertEqual(
+            database._canonical_lagrangian_payload(checked)["hypermultiplets"],
+            [{"kind": "full", "dynkin_labels": [[1], [1]], "number": 2}],
+        )
+        invalid = deepcopy(A1_PRODUCT_SCFT)
+        invalid["hypermultiplets"][0].update(kind="half", number=4)
+        with self.assertRaisesRegex(database.TheoryCheckError, "pseudoreal"):
+            database._checked_results(invalid)
+
+    def test_shared_flavor_ignores_split_without_mutating_properties(self):
+        for product, number in ((False, 4), (True, 1)):
+            shared = []
+            for kind, count in (("full", number), ("half", 2 * number)):
+                _, properties = database._checked_results(
+                    _pseudoreal_matter((kind, count), product=product)
+                )
+                original = deepcopy(properties)
+                shared.append(database._shared_properties(properties))
+                self.assertEqual(properties, original)
+                factor = shared[-1]["flavor_symmetry"]["factors"][0]
+                self.assertEqual(factor["half_hyper_units"], 2 * number)
+                self.assertNotIn("full_hypermultiplets", factor)
+                self.assertNotIn("half_hypermultiplets", factor)
+            self.assertEqual(shared[0], shared[1])
+
+    def test_existing_full_properties_accept_half_description(self):
+        _, full = database._checked_results(_pseudoreal_matter(("full", 4)))
+        _, half = database._checked_results(_pseudoreal_matter(("half", 8)))
+        for legacy_split, missing_spectrum, json_string in (
+            (False, False, True), (True, False, True),
+            (True, True, True), (True, False, False),
+        ):
+            with self.subTest(legacy=legacy_split, spectrum=missing_spectrum, string=json_string):
+                stored = database._shared_properties(full)
+                if legacy_split:
+                    stored["flavor_symmetry"] = deepcopy(full["flavor_symmetry"])
+                if missing_spectrum:
+                    stored.pop("coulomb_branch_spectrum")
+                encoded = database._json_text(stored)
+                connection = _RecordingConnection(select_rows=[{
+                    "properties_json": encoded if json_string else json.loads(encoded)
+                }])
+                database._insert_shared_properties(connection, theory_id=3, properties=half)
+                updates = [
+                    params for sql, params in connection.statements
+                    if sql.startswith("UPDATE theory_properties")
+                ]
+                self.assertEqual(len(updates), int(legacy_split or missing_spectrum))
+                if updates:
+                    expected = json.loads(database._json_text(database._shared_properties(half)))
+                    self.assertEqual(json.loads(updates[0][1]), expected)
+
+    def test_shared_properties_still_reject_physical_mismatches(self):
+        _, properties = database._checked_results(_pseudoreal_matter(("half", 8)))
+        for change in ("multiplicity", "central_charge"):
+            stored = database._shared_properties(properties)
+            stored["flavor_symmetry"] = deepcopy(properties["flavor_symmetry"])
+            stored = json.loads(database._json_text(stored))
+            if change == "multiplicity":
+                stored["flavor_symmetry"]["factors"][0]["half_hyper_units"] = 6
+            else:
+                stored["central_charges"]["a"]["numerator"] += 1
+            connection = _RecordingConnection(select_rows=[{"properties_json": stored}])
+            with self.assertRaisesRegex(ValueError, "different shared properties"):
+                database._insert_shared_properties(connection, theory_id=3, properties=properties)
+            self.assertEqual(len(connection.statements), 1)
+
+    def test_flavor_rows_store_units_and_realization_rows_preserve_split(self):
+        data = _pseudoreal_matter(("full", 2), ("half", 4))
+        checked, properties = database._checked_results(data)
+        connection = _RecordingConnection()
+        database._insert_shared_properties(connection, theory_id=3, properties=properties)
+        flavor_sql, flavor_params = next(
+            row for row in connection.statements
+            if row[0].startswith("INSERT INTO flavor_symmetry_factors")
+        )
+        self.assertNotIn("full_hypermultiplets", flavor_sql)
+        self.assertNotIn("half_hypermultiplets", flavor_sql)
+        self.assertEqual(flavor_sql.count("%s"), len(flavor_params))
+        self.assertEqual(flavor_params[7], 8)
+        database._insert_realization(connection, 3, database._canonical_hash(checked), data, checked, properties)
+        hyper_rows = [
+            params for sql, params in connection.statements
+            if sql.startswith("INSERT INTO hypermultiplets(")
+        ]
+        self.assertEqual([params[3:5] for params in hyper_rows], [("full", 2), ("half", 4)])
+        realization = next(
+            params for sql, params in connection.statements
+            if sql.startswith("INSERT INTO lagrangian_realizations")
+        )
+        self.assertEqual(json.loads(realization[9]), data)
+
+    def test_store_deduplicates_equivalent_splits_in_both_orders(self):
+        for product, number in ((False, 4), (True, 1)):
+            full = _pseudoreal_matter(("full", number), product=product)
+            half = _pseudoreal_matter(("half", 2 * number), product=product)
+            for first_data, second_data in ((full, half), (half, full)):
+                with self.subTest(product=product, first=first_data):
+                    connection = _RecordingConnection()
+                    connection.begin = MagicMock()
+                    connection.commit = MagicMock()
+                    connection.rollback = MagicMock()
+                    realizations = {}
+                    insert_realization = database._insert_realization
+
+                    def fetchone(connection, statement, parameters=()):
+                        if "lr.canonical_hash" in statement:
+                            return realizations.get(parameters[0])
+                        if "SELECT name FROM theories" in statement:
+                            return {"name": "test"}
+                        return None
+
+                    def insert(connection, theory_id, canonical_hash, data, checked, properties):
+                        realization_id = insert_realization(
+                            connection, theory_id, canonical_hash, data, checked, properties
+                        )
+                        realizations[canonical_hash] = {
+                            "realization_id": realization_id, "theory_id": theory_id,
+                            "name": "test", "gauge_group": checked["group"],
+                        }
+                        return realization_id
+
+                    with (
+                        patch.object(database, "initialize_database"),
+                        patch.object(database, "_fetchone", side_effect=fetchone),
+                        patch.object(database, "_insert_realization", side_effect=insert),
+                    ):
+                        first = database.store_lagrangian_theory(connection, first_data)
+                        writes = len(connection.statements)
+                        second = database.store_lagrangian_theory(connection, second_data)
+                        attached = database.store_lagrangian_theory(
+                            connection, second_data, theory_id=first.theory_id
+                        )
+                        with self.assertRaisesRegex(ValueError, "already attached"):
+                            database.store_lagrangian_theory(
+                                connection, second_data, theory_id=first.theory_id + 1
+                            )
+                    self.assertTrue(first.inserted)
+                    for result in (second, attached):
+                        self.assertFalse(result.inserted)
+                        self.assertEqual(result.theory_id, first.theory_id)
+                        self.assertEqual(result.lagrangian_realization_id, first.lagrangian_realization_id)
+                        self.assertEqual(result.canonical_hash, first.canonical_hash)
+                    self.assertEqual(len(connection.statements), writes)
+                    self.assertEqual(len(realizations), 1)
+                    connection.commit.assert_called_once_with()
+                    connection.rollback.assert_not_called()
 
     def test_initialize_database_executes_schema_and_records_version(self):
         connection = _RecordingConnection()
@@ -143,7 +431,7 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
             for statement, parameters in connection.statements
             if "INSERT INTO schema_metadata" in statement
         )
-        self.assertEqual(metadata_parameters, ("schema_version", "5"))
+        self.assertEqual(metadata_parameters, ("schema_version", "6"))
 
     def test_initialize_database_migrates_version_one_schema(self):
         connection = _RecordingConnection(
@@ -173,6 +461,7 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
                 ("3", "schema_version"),
                 ("4", "schema_version"),
                 ("5", "schema_version"),
+                ("6", "schema_version"),
             ],
         )
 
@@ -249,6 +538,20 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
             if statement.startswith("UPDATE schema_metadata")
         )
         self.assertEqual(metadata_parameters, ("5", "schema_version"))
+
+    def test_initialize_database_migrates_version_five_schema(self):
+        connection = _RecordingConnection(select_rows=[{"metadata_value": "5"}])
+        database.initialize_database(connection)
+        migrations = [
+            statement for statement, _ in connection.statements
+            if statement.startswith("ALTER TABLE")
+        ]
+        self.assertEqual(len(migrations), 1)
+        self.assertIn("ALTER TABLE flavor_symmetry_factors", migrations[0])
+        self.assertIn("DROP COLUMN full_hypermultiplets", migrations[0])
+        self.assertIn("DROP COLUMN half_hypermultiplets", migrations[0])
+        self.assertNotIn("half_hyper_units", migrations[0])
+        self.assertEqual(connection.statements[-1][1], ("6", "schema_version"))
 
     def test_connect_database_uses_pymysql_options(self):
         connection = MagicMock()
@@ -516,6 +819,48 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
             ):
                 database.store_lagrangian_theory(connection, data)
         connection.begin.assert_not_called()
+
+
+@unittest.skipUnless(
+    shutil.which("form") and shutil.which("lie"), "FORM and LiE are required"
+)
+class TheoryDatabaseBackendTests(unittest.TestCase):
+    def test_equivalent_splits_have_equal_actual_indices_and_shared_properties(self):
+        with (
+            tempfile.TemporaryDirectory() as cache_directory,
+            patch.multiple(
+                theory_properties,
+                INDEX_MAX_ORDER=6,
+                C_INDEX_MAX_ORDER=12,
+                DEFAULT_PROCESS_COUNT=1,
+                INDEX_CACHE_DIRECTORY=Path(cache_directory),
+            ),
+        ):
+            for product, number in ((False, 4), (True, 1)):
+                with self.subTest(product=product):
+                    checked_full, full = database._checked_results(
+                        _pseudoreal_matter(("full", number), product=product)
+                    )
+                    checked_half, half = database._checked_results(
+                        _pseudoreal_matter(("half", 2 * number), product=product)
+                    )
+                    self.assertEqual(
+                        database._canonical_hash(checked_full),
+                        database._canonical_hash(checked_half),
+                    )
+                    self.assertIsNotNone(full["superconformal_index"])
+                    self.assertIsNotNone(full["coulomb_branch_index"])
+                    self.assertEqual(
+                        database._shared_properties(full),
+                        database._shared_properties(half),
+                    )
+                    connection = _RecordingConnection(select_rows=[{
+                        "properties_json": database._json_text(
+                            database._shared_properties(full)
+                        )
+                    }])
+                    database._insert_shared_properties(connection, 3, half)
+                    self.assertEqual(len(connection.statements), 1)
 
 
 MYSQL_TEST_DATABASE = os.environ.get("N2_TEST_MYSQL_DATABASE")
