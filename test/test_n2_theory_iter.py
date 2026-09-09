@@ -19,6 +19,7 @@ from anomalies.lie_algebra import get_lie_algebra, representation_reality
 from common.n2_theory_iter import (
     enumerate_irreps,
     enumerate_product_irreps,
+    enumerate_product_theory_candidates,
     enumerate_simple_theory_candidates,
 )
 
@@ -418,6 +419,146 @@ class SimpleTheoryCandidateTests(unittest.TestCase):
 
                 self.assertEqual(len(actual), len(set(actual)))
                 self.assertEqual(set(actual), expected)
+
+
+class ProductTheoryCandidateTests(unittest.TestCase):
+    @staticmethod
+    def matter_key(candidate):
+        ids = [factor["id"] for factor in candidate["gauge_groups"]]
+        return tuple(sorted(
+            (tuple(tuple(hyper["representations"][key]) for key in ids),
+             hyper["kind"], hyper["number"])
+            for hyper in candidate["hypermultiplets"]
+        ))
+
+    def assert_valid_candidates(self, candidates):
+        keys = []
+        for candidate in candidates:
+            keys.append(self.matter_key(candidate))
+            checked = check_input_data(candidate)
+            self.assertEqual(checked["errors"], [])
+            self.assertTrue(checked["one_loop_beta_vanishes"])
+            self.assertTrue(checked["anomaly_free"])
+            for hyper, parsed in zip(candidate["hypermultiplets"], checked["hypermultiplets"]):
+                self.assertIs(type(hyper["number"]), int)
+                self.assertGreater(hyper["number"], 0)
+                self.assertTrue(any(any(labels) for labels in hyper["representations"].values()))
+                self.assertEqual(
+                    hyper["kind"], "half" if parsed.reality == "pseudoreal" else "full"
+                )
+        self.assertEqual(len(keys), len(set(keys)))
+        return set(keys)
+
+    def test_su2_pair_has_exactly_eight_matter_contents(self):
+        candidates = enumerate_product_theory_candidates(["A1", "A1"])
+        actual = self.assert_valid_candidates(candidates)
+
+        def matter(*terms):
+            return tuple(sorted(
+                (((left,), (right,)), kind, number)
+                for left, right, kind, number in terms
+            ))
+
+        expected = {
+            matter((2, 0, "full", 1), (0, 2, "full", 1)),
+            matter((1, 0, "half", 8), (0, 2, "full", 1)),
+            matter((2, 0, "full", 1), (0, 1, "half", 8)),
+            matter((1, 0, "half", 8), (0, 1, "half", 8)),
+            matter((1, 1, "full", 2)),
+            matter((1, 1, "full", 1), (1, 0, "half", 4), (0, 1, "half", 4)),
+            matter((1, 2, "half", 1), (1, 0, "half", 5)),
+            matter((2, 1, "half", 1), (0, 1, "half", 5)),
+        }
+        self.assertEqual(actual, expected)
+
+    def test_single_factor_agrees_with_simple_enumeration(self):
+        for algebra in ("A1", "A2", "C2", "C4", "G2", "E6"):
+            with self.subTest(algebra=algebra):
+                candidates = enumerate_product_theory_candidates([algebra])
+                self.assert_valid_candidates(candidates)
+                self.assertCountEqual(
+                    [tuple((labels[0], kind, number)
+                           for labels, kind, number in self.matter_key(candidate))
+                     for candidate in candidates],
+                    [SimpleTheoryCandidateTests.matter_key(candidate)
+                     for candidate in enumerate_simple_theory_candidates(algebra)],
+                )
+
+    def test_su3_pair_keeps_both_bifundamental_orientations(self):
+        candidates = enumerate_product_theory_candidates(["A2", "A2"])
+        keys = self.assert_valid_candidates(candidates)
+        self.assertIn(((((1, 0), (1, 0)), "full", 2),), keys)
+        self.assertIn(((((1, 0), (0, 1)), "full", 2),), keys)
+        self.assertIn(tuple(sorted([
+            (((1, 0), (1, 0)), "full", 1),
+            (((1, 0), (0, 1)), "full", 1),
+        ])), keys)
+        self.assertNotIn(((((0, 1), (0, 1)), "full", 2),), keys)
+
+    def test_three_pseudoreal_factors_allow_odd_trifundamental_count(self):
+        candidates = enumerate_product_theory_candidates(["A1"] * 3)
+        keys = self.assert_valid_candidates(candidates)
+        self.assertIn(((((1,), (1,), (1,)), "half", 2),), keys)
+        self.assertIn(tuple(sorted([
+            (((1,), (1,), (1,)), "half", 1),
+            (((1,), (0,), (0,)), "half", 4),
+            (((0,), (1,), (0,)), "half", 4),
+            (((0,), (0,), (1,)), "half", 4),
+        ])), keys)
+
+    def test_mixed_groups_match_exhaustive_rational_reference(self):
+        for algebras in (("A1", "A2"), ("A1", "C2"), ("C2", "G2")):
+            with self.subTest(algebras=algebras):
+                factors = [factor(f"gauge_{i}", algebra)
+                           for i, algebra in enumerate(algebras, start=1)]
+                groups = [{"id": f.factor_id, "algebra": f.algebra.cartan_type}
+                          for f in factors]
+                budgets = [2 * f.algebra.dual_coxeter_number for f in factors]
+                types, costs, bounds = [], [], []
+                for labels, _ in enumerate_product_irreps(factors):
+                    # Derive costs through the checker, independently of the
+                    # enumerator's reality classification and integer scaling.
+                    data = {"gauge_groups": groups, "hypermultiplets": [{
+                        "representations": {key: list(value) for key, value in labels.items()},
+                        "kind": "full", "number": 1,
+                    }]}
+                    checked = check_input_data(data)
+                    self.assertEqual(checked["errors"], [])
+                    hyper = checked["hypermultiplets"][0]
+                    half = hyper.reality == "pseudoreal"
+                    cost = tuple(hyper.beta_contributions[f.factor_id] / (2 if half else 1)
+                                 for f in factors)
+                    types.append((tuple(labels[f.factor_id] for f in factors),
+                                  "half" if half else "full"))
+                    costs.append(cost)
+                    bounds.append(min(int(b // c) for b, c in zip(budgets, cost) if c))
+                expected = {
+                    tuple(sorted((*kind, number) for kind, number in zip(types, counts) if number))
+                    for counts in product(*(range(bound + 1) for bound in bounds))
+                    if all(sum(number * cost[a] for number, cost in zip(counts, costs)) == budget
+                           for a, budget in enumerate(budgets))
+                }
+                candidates = enumerate_product_theory_candidates(algebras)
+                self.assertEqual(self.assert_valid_candidates(candidates), expected)
+
+    def test_iterable_input_factor_ids_and_independent_output_objects(self):
+        candidates = enumerate_product_theory_candidates(iter(["a_1", "C2"]))
+        expected_groups = [{"id": "gauge_1", "algebra": "A1"},
+                           {"id": "gauge_2", "algebra": "C2"}]
+        self.assertGreater(len(candidates), 1)
+        for candidate in candidates:
+            self.assertEqual(candidate["gauge_groups"], expected_groups)
+            self.assertEqual(json.loads(json.dumps(candidate)), candidate)
+        before = json.dumps(candidates[1:])
+        candidates[0]["gauge_groups"][0]["id"] = "changed"
+        candidates[0]["hypermultiplets"][0]["representations"]["gauge_1"][0] = 100
+        self.assertEqual(json.dumps(candidates[1:]), before)
+
+    def test_invalid_cartan_iterables_are_rejected(self):
+        for groups in ([], None, "A1", b"A1", [1], ["A1", None], ["A0"], ["D2"]):
+            with self.subTest(groups=groups):
+                with self.assertRaises(ValueError):
+                    enumerate_product_theory_candidates(groups)
 
 
 if __name__ == "__main__":

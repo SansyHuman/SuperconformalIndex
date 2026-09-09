@@ -1,4 +1,4 @@
-"""Enumerate irreducible gauge representations with bounded Dynkin indices."""
+"""Enumerate bounded irreps and conformal matter candidates for gauge groups."""
 
 from collections.abc import Iterable, Mapping
 from fractions import Fraction
@@ -12,7 +12,7 @@ from anomalies.lie_algebra import (
     dynkin_index,
     representation_dimension, get_lie_algebra, representation_reality,
 )
-from common.math_utils import frobenius_solve
+from common.math_utils import frobenius_solve, frobenius_system_solve
 from common.number_utils import as_positive_fraction
 
 
@@ -245,4 +245,95 @@ def enumerate_simple_theory_candidates(
 
         candidates.append(theory)
 
+    return candidates
+
+
+def enumerate_product_theory_candidates(
+    gauge_groups: Iterable[str],
+) -> list[dict[str, Any]]:
+    """Enumerate conformal matter candidates for a product of simple groups.
+
+    Accept a nonempty iterable of Cartan-type strings, e.g. ["A1", "C2"].
+    Factors receive IDs gauge_1, gauge_2, ... in input order; repeated Cartan
+    types are allowed and factor permutations are not identified. A single
+    factor is also accepted, with results in the product-theory input schema.
+
+    Reuse enumerate_product_irreps with inclusive 2*h_dual bounds and its
+    simultaneous-conjugation convention. For each total pseudoreal irrep,
+    count half hypers with cost T_a(R); otherwise count full hypers with cost
+    2*T_a(R). Solve one beta equation per factor using exact row-wise LCM
+    scaling and frobenius_system_solve. Odd half-hyper counts are allowed.
+
+    Return dictionaries containing gauge_groups and hypermultiplets, ready
+    for the anomaly checker. No anomaly check is performed here. Both coupled
+    and decoupled matter contents are included, but free gauge-singlet matter
+    and zero multiplicities are omitted. Solution order is not specified.
+    """
+    if isinstance(gauge_groups, (str, bytes)):
+        raise ValueError("gauge_groups must be a nonempty iterable of Cartan strings")
+    try:
+        cartan_types = tuple(gauge_groups)
+    except TypeError as exc:
+        raise ValueError(
+            "gauge_groups must be a nonempty iterable of Cartan strings"
+        ) from exc
+    if not cartan_types or any(not isinstance(group, str) for group in cartan_types):
+        raise ValueError("gauge_groups must be a nonempty iterable of Cartan strings")
+
+    factors = tuple(
+        GaugeFactorData(f"gauge_{i}", get_lie_algebra(cartan_type))
+        for i, cartan_type in enumerate(cartan_types, start=1)
+    )
+    budgets = tuple(2 * factor.algebra.dual_coxeter_number for factor in factors)
+    reality_cache: dict[tuple[str, DynkinLabels], str] = {}
+    matter = []
+    for labels, indices in enumerate_product_irreps(factors):
+        realities = []
+        for factor in factors:
+            key = (factor.algebra.cartan_type, labels[factor.factor_id])
+            if key not in reality_cache:
+                reality_cache[key] = representation_reality(factor.algebra, key[1])
+            realities.append(reality_cache[key])
+        # Reality is multiplicative for an external tensor product.
+        pseudoreal = (
+            "complex" not in realities and realities.count("pseudoreal") % 2 == 1
+        )
+        kind = "half" if pseudoreal else "full"
+        costs = tuple(
+            indices[factor.factor_id] * (1 if pseudoreal else 2)
+            for factor in factors
+        )
+        if any(cost > budget for cost, budget in zip(costs, budgets)):
+            continue
+        matter.append((labels, kind, costs))
+
+    coefficients = []
+    targets = []
+    for i, budget in enumerate(budgets):
+        scale = lcm(*(costs[i].denominator for _, _, costs in matter))
+        coefficients.append([
+            (costs[i] * scale).numerator for _, _, costs in matter
+        ])
+        targets.append(budget * scale)
+
+    candidates = []
+    for solution in frobenius_system_solve(coefficients, targets):
+        candidates.append({
+            "gauge_groups": [
+                {"id": factor.factor_id, "algebra": factor.algebra.cartan_type}
+                for factor in factors
+            ],
+            "hypermultiplets": [
+                {
+                    "representations": {
+                        factor.factor_id: list(labels[factor.factor_id])
+                        for factor in factors
+                    },
+                    "number": number,
+                    "kind": kind,
+                }
+                for (labels, kind, _), number in zip(matter, solution)
+                if number
+            ],
+        })
     return candidates
