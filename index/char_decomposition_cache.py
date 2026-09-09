@@ -7,7 +7,7 @@ For an irreducible representation ``R`` and a tuple ``powers`` whose entry
 
 Decompositions and final singlet coefficients share a local SQLite database.
 Keys use Cartan types, Dynkin labels and Adams powers, independently of FORM
-character names. Legacy JSON caches are imported on demand and left intact.
+character names.
 """
 
 from __future__ import annotations
@@ -218,8 +218,8 @@ class CharacterDecompositionCache:
     """Persist exact character decompositions and singlet coefficients in SQLite.
 
     With no path arguments, use ``char_decomposition_cache.db`` at the project
-    root. The positional ``cache_directory`` remains supported and places that
-    filename inside the supplied directory. ``database_path`` selects a file
+    root. ``cache_directory`` places that filename inside the supplied
+    directory. ``database_path`` selects a file
     explicitly; these two arguments are mutually exclusive.
 
     Each thread opens its own connection and keeps its own in-memory cache.
@@ -248,7 +248,6 @@ class CharacterDecompositionCache:
         else:
             path = DEFAULT_CACHE_DATABASE
         self.database_path = path.resolve()
-        self.cache_directory = self.database_path.parent
         self.lie_executable = lie_executable
         self.max_nodes = int(max_nodes)
         self.max_objects = int(max_objects)
@@ -257,12 +256,6 @@ class CharacterDecompositionCache:
             raise ValueError("max_workers must be positive or None")
         self.max_workers = None if max_workers is None else int(max_workers)
         self._local = threading.local()
-        self._legacy_directories = [self.cache_directory]
-        if self.database_path == DEFAULT_CACHE_DATABASE.resolve():
-            self._legacy_directories.extend([
-                self.cache_directory / "char_decomposition_cache",
-                self.cache_directory / "index" / "char_decomposition_cache_data",
-            ])
 
     def _state(self):
         """Maintain each thread's connection, memory caches and pending writes."""
@@ -272,7 +265,7 @@ class CharacterDecompositionCache:
             if state is not None and state["connection"] is not None:
                 state["connection"].close()
             state = dict(pid=os.getpid(), connection=None, decompositions={},
-                         singlets={}, imported=set(), pending=None)
+                         singlets={}, pending=None)
             self._local.state = state
         return state
 
@@ -344,13 +337,6 @@ class CharacterDecompositionCache:
     def __exit__(self, exc_type, exc, traceback):
         self.close()
 
-    def cache_path(self, cartan_type, labels, adams_order) -> Path:
-        """Return the shared SQLite file (legacy path-helper signature)."""
-        _canonical_request(cartan_type, labels, (1,))
-        if as_nonnegative_int(adams_order, "Adams order") == 0:
-            raise ValueError("Adams order must be positive")
-        return self.database_path
-
     @staticmethod
     def _encode_decomposition(decomposition):
         """Convert decomposition dictionary to JSON text."""
@@ -382,38 +368,6 @@ class CharacterDecompositionCache:
                 """, rows)
         self._retry_busy(write)
 
-    def _import_legacy(self, request):
-        algebra, labels, powers = request
-        order = _adams_order(powers)
-        filename = f"{algebra}_dynkin_{'-'.join(map(str, labels))}_adams_order_{order}.json"
-        imported = self._state()["imported"]
-        for directory in self._legacy_directories:
-            path = directory / algebra / filename
-            if path in imported or not path.is_file():
-                continue
-            with path.open(encoding="utf-8") as handle:
-                payload = json.load(handle)
-            if (payload.get("schema_version") != 1 or payload.get("algebra") != algebra
-                    or tuple(payload.get("dynkin_labels", ())) != labels
-                    or payload.get("adams_order") != order):
-                raise RuntimeError(f"cache metadata does not match filename: {path}")
-            entries = []
-            for entry in payload.get("decompositions", []):
-                key = _canonical_request(algebra, labels, entry["adams_powers"])
-                if _adams_order(key[2]) != order:
-                    raise RuntimeError(f"cache Adams order does not match filename: {path}")
-                decomposition = {}
-                for term in entry["terms"]:
-                    term_labels = _canonical_labels(term["dynkin_labels"])
-                    if len(term_labels) != len(labels):
-                        raise RuntimeError(f"cache term rank does not match filename: {path}")
-                    coefficient = as_integer(term["coefficient"], "coefficient")
-                    if coefficient:
-                        decomposition[term_labels] = coefficient
-                entries.append((key, decomposition))
-            self._write_decompositions(entries)
-            imported.add(path)
-
     def _lookup_decomposition(self, request):
         """Retrieve cached decomposition result."""
         memory = self._state()["decompositions"]
@@ -425,9 +379,6 @@ class CharacterDecompositionCache:
                  WHERE algebra=? AND dynkin_labels=? AND adams_powers=?"""
         connection = self._connection()
         row = connection.execute(sql, parameters).fetchone()
-        if row is None:
-            self._import_legacy(request)
-            row = connection.execute(sql, parameters).fetchone()
         if row is None:
             return None
         decomposition = self._decode_decomposition(row[0])

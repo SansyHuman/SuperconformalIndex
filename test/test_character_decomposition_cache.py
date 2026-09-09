@@ -1,6 +1,5 @@
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from pathlib import Path
-import json
 import sqlite3
 import shutil
 import sys
@@ -81,23 +80,6 @@ class SQLiteCacheTests(unittest.TestCase):
         self.assertEqual(reopened.get_decomposition('A1', (1,), (1,)), {(0,): huge})
         self.assertEqual(reopened.get_decomposition('A1', (2,), (1,)), {})
         self.assertEqual(reopened.singlet_multiplicities('A1', 1, [[{(0,): huge}]]), [huge])
-
-    def test_legacy_import_leaves_json_unchanged(self):
-        requests = [('A1', (1,), (0, 2)), ('A1', (1,), (2, 1))]
-        expected = [su2_fundamental_adams_product(request[2]) for request in requests]
-        legacy = self.directory / 'legacy' / 'A1'
-        legacy.mkdir(parents=True)
-        payload = dict(schema_version=1, algebra='A1', dynkin_labels=[1], adams_order=4,
-                       decompositions=[dict(adams_powers=list(request[2]) + [0] * (4 - len(request[2])),
-                                            terms=[dict(dynkin_labels=list(labels), coefficient=coefficient)
-                                                   for labels, coefficient in value.items()])
-                                       for request, value in zip(requests, expected)])
-        (legacy / 'A1_dynkin_1_adams_order_4.json').write_text(json.dumps(payload))
-        files = {path: path.read_bytes() for path in (self.directory / 'legacy').rglob('*.json')}
-        cache = self.cache('legacy', lie_executable='missing-lie')
-        self.assertEqual(cache.get_decompositions(requests), expected)
-        self.assertTrue(cache.database_path.is_file())
-        self.assertEqual(files, {path: path.read_bytes() for path in files})
 
     def test_character_singlets_merge_repetitions_and_preserve_conjugates(self):
         cache = self.cache()

@@ -89,8 +89,7 @@ class CharacterDecompositionCacheTests(unittest.TestCase):
             parallel = cache.get_decompositions(requests)
             self.assertEqual(parallel, sequential)
 
-            path = cache.cache_path("A1", (1,), 6)
-            with sqlite3.connect(path) as connection:
+            with sqlite3.connect(cache.database_path) as connection:
                 rows = connection.execute(
                     "SELECT adams_powers FROM character_decompositions WHERE adams_order=6"
                 ).fetchall()
