@@ -3,9 +3,9 @@
 
 The input conventions agree with ``anomalies.check_n2_anomalies``. FORM expands
 the exact, truncated representation-valued plethystic exponential. LiE
-decomposes products of Adams-operated characters, and the file cache in
-``index.char_decomposition_cache`` stores those decompositions by canonical
-Cartan type and Dynkin labels.
+decomposes products of Adams-operated characters. The SQLite cache in
+``index.char_decomposition_cache`` stores decompositions and final singlet
+coefficients using Cartan types, Dynkin labels and Adams powers.
 
 For a product gauge group, FORM keeps a separate formal character for each
 simple factor and LiE performs the singlet projection factor by factor.
@@ -19,6 +19,7 @@ from fractions import Fraction
 import json
 from pathlib import Path
 import re
+import sqlite3
 import sys
 from typing import Any
 
@@ -306,27 +307,6 @@ def _project_terms(
     cache: CharacterDecompositionCache,
 ) -> dict[tuple[int, int, int], Fraction]:
     """Project independently to the singlet of every simple gauge factor."""
-    character_keys = {
-        item
-        for term in terms
-        for item in term.characters
-    }
-    sorted_character_keys = sorted(character_keys)
-    decomposition_requests = []
-    for character, powers in sorted_character_keys:
-        factor_position, labels = character_specs[character]
-        algebra = factors[factor_position].algebra
-        decomposition_requests.append(
-            (algebra.cartan_type, labels, powers)
-        )
-    decompositions = dict(
-        zip(
-            sorted_character_keys,
-            cache.get_decompositions(decomposition_requests),
-            strict=True,
-        )
-    )
-
     structures = sorted({term.characters for term in terms})
     singlets_by_factor: list[
         dict[tuple[tuple[int, AdamsPowers], ...], int]
@@ -343,10 +323,10 @@ def _project_terms(
             }
         )
         products = [
-            [decompositions[item] for item in structure]
+            [(character_specs[character][1], powers) for character, powers in structure]
             for structure in factor_structures
         ]
-        multiplicities = cache.singlet_multiplicities(
+        multiplicities = cache.get_singlet_multiplicities(
             factor.algebra.cartan_type,
             factor.algebra.rank,
             products,
@@ -420,12 +400,18 @@ def calculate_index(
     order: int,
     *,
     cache_directory: str | Path | None = None,
+    database_path: str | Path | None = None,
     lie_executable: str = "lie",
     form_executable: str = "form",
     timeout: float = 600,
     processes: int | None = None,
 ) -> Any:
-    """Calculate the exact simple- or product-group index through ``t^order``."""
+    """Calculate the exact simple- or product-group index through ``t^order``.
+
+    The default SQLite cache is ``char_decomposition_cache.db`` at the
+    project root. Select a file with ``database_path`` or place the default
+    filename in a custom ``cache_directory``; do not supply both.
+    """
     order = as_nonnegative_int(order, "order")
     factors, hypermultiplets = _parse_input(data)
 
@@ -434,6 +420,7 @@ def calculate_index(
         hypermultiplets,
         order,
         cache_directory=cache_directory,
+        database_path=database_path,
         lie_executable=lie_executable,
         form_executable=form_executable,
         timeout=timeout,
@@ -447,6 +434,7 @@ def calculate_index_internal(
     order: int,
     *,
     cache_directory: str | Path | None = None,
+    database_path: str | Path | None = None,
     lie_executable: str = "lie",
     form_executable: str = "form",
     timeout: float = 600,
@@ -473,13 +461,14 @@ def calculate_index_internal(
         timeout=timeout,
     )
     terms = _parse_form_output(form_output)
-    cache = CharacterDecompositionCache(
+    with CharacterDecompositionCache(
         cache_directory,
+        database_path=database_path,
         lie_executable=lie_executable,
         timeout=timeout,
         max_workers=processes,
-    )
-    projected = _project_terms(terms, factors, character_specs, cache)
+    ) as cache:
+        projected = _project_terms(terms, factors, character_specs, cache)
     return _to_sage_polynomial(projected)
 
 
@@ -504,10 +493,16 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         help="largest power of t retained in the index",
     )
-    parser.add_argument(
+    cache_options = parser.add_mutually_exclusive_group()
+    cache_options.add_argument(
         "--cache-directory",
         type=Path,
-        help="directory for LiE character-decomposition JSON files",
+        help="directory containing char_decomposition_cache.db",
+    )
+    cache_options.add_argument(
+        "--cache-database",
+        type=Path,
+        help="SQLite cache file (default: project-root char_decomposition_cache.db)",
     )
     parser.add_argument(
         "--processes",
@@ -521,10 +516,12 @@ def main(argv: list[str] | None = None) -> int:
             args.input,
             args.order,
             cache_directory=args.cache_directory,
+            database_path=args.cache_database,
             processes=args.processes,
         )
     except (
         OSError,
+        sqlite3.Error,
         json.JSONDecodeError,
         ArithmeticError,
         RuntimeError,

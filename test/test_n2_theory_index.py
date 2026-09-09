@@ -2,6 +2,7 @@ from fractions import Fraction
 import json
 from pathlib import Path
 import shutil
+import sqlite3
 import sys
 import tempfile
 import unittest
@@ -44,62 +45,67 @@ class LieDecompositionParserTests(unittest.TestCase):
 
 @unittest.skipUnless(HAS_EXTERNAL_BACKEND, "FORM and LiE are required")
 class CharacterDecompositionCacheTests(unittest.TestCase):
-    def test_cache_uses_project_cartan_and_dynkin_filename_convention(self):
+    def test_cache_stores_cartan_and_dynkin_keys_in_sqlite(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = CharacterDecompositionCache(directory)
+            self.addCleanup(cache.close)
             decomposition = cache.get_decomposition("A1", (1,), (0, 1))
 
-            expected_path = (
-                Path(directory)
-                / "A1"
-                / "A1_dynkin_1_adams_order_2.json"
-            )
+            expected_path = Path(directory) / "char_decomposition_cache.db"
             self.assertTrue(expected_path.is_file())
             self.assertEqual(decomposition, {(0,): -1, (2,): 1})
 
-            with expected_path.open("r", encoding="utf-8") as handle:
-                payload = json.load(handle)
-            self.assertEqual(payload["algebra"], "A1")
-            self.assertEqual(payload["dynkin_labels"], [1])
-            self.assertEqual(payload["adams_order"], 2)
+            with sqlite3.connect(expected_path) as connection:
+                row = connection.execute(
+                    "SELECT algebra, dynkin_labels, adams_order FROM character_decompositions"
+                ).fetchone()
+            self.assertEqual(row, ("A1", "[1]", 2))
+            cache.close()
 
             file_only = CharacterDecompositionCache(
                 directory, lie_executable="missing-lie-for-cache-test"
             )
+            self.addCleanup(file_only.close)
             self.assertEqual(
                 file_only.get_decomposition("A1", (1,), (0, 1)),
                 decomposition,
             )
 
-    def test_parallel_batch_preserves_entries_that_share_one_cache_file(self):
+    def test_parallel_batch_preserves_entries_that_share_one_database(self):
         with tempfile.TemporaryDirectory() as directory:
             requests = [
                 ("A1", (1,), (0, 3)),
                 ("A1", (1,), (1, 1, 1)),
                 ("A1", (1,), (2, 0, 0, 1)),
             ]
-            sequential = CharacterDecompositionCache(
+            with CharacterDecompositionCache(
                 Path(directory) / "sequential", max_workers=1
-            ).get_decompositions(requests)
+            ) as sequential_cache:
+                sequential = sequential_cache.get_decompositions(requests)
             cache = CharacterDecompositionCache(
                 Path(directory) / "parallel", max_workers=3
             )
+            self.addCleanup(cache.close)
             parallel = cache.get_decompositions(requests)
             self.assertEqual(parallel, sequential)
 
             path = cache.cache_path("A1", (1,), 6)
-            with path.open("r", encoding="utf-8") as handle:
-                payload = json.load(handle)
+            with sqlite3.connect(path) as connection:
+                rows = connection.execute(
+                    "SELECT adams_powers FROM character_decompositions WHERE adams_order=6"
+                ).fetchall()
             self.assertEqual(
-                {tuple(entry["adams_powers"]) for entry in payload["decompositions"]},
+                {tuple(json.loads(row[0])) for row in rows},
                 {request[2] + (0,) * (6 - len(request[2])) for request in requests},
             )
+            cache.close()
 
             file_only = CharacterDecompositionCache(
                 Path(directory) / "parallel",
                 lie_executable="missing-lie-for-parallel-cache-test",
                 max_workers=3,
             )
+            self.addCleanup(file_only.close)
             self.assertEqual(file_only.get_decompositions(requests), parallel)
 
 

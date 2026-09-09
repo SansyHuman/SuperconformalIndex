@@ -48,7 +48,8 @@ RepresentationKey = tuple[tuple[str, DynkinLabels], ...]
 
 INDEX_MAX_ORDER = 18
 C_INDEX_MAX_ORDER = 90
-INDEX_CACHE_DIRECTORY = Path(__file__).resolve().parents[1] / "char_decomposition_cache"
+# The cache stores char_decomposition_cache.db inside this directory.
+INDEX_CACHE_DIRECTORY = Path(__file__).resolve().parents[1]
 LIE_EXECUTABLE = "lie"
 FORM_EXECUTABLE = "form"
 DEFAULT_TIMEOUT = 600
