@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>N2DatabaseWindow</class>
+ <widget class="QMainWindow" name="N2DatabaseWindow">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>960</width><height>680</height></rect></property>
+  <property name="windowTitle"><string>N=2 Landscape</string></property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="mainLayout">
+    <item>
+     <widget class="QTabWidget" name="tabs">
+      <property name="currentIndex"><number>0</number></property>
+      <widget class="QWidget" name="anomalyTab">
+       <attribute name="title"><string>anomaly</string></attribute>
+      </widget>
+      <widget class="QWidget" name="indexTab">
+       <attribute name="title"><string>index</string></attribute>
+      </widget>
+     </widget>
+    </item>
+   </layout>
+  </widget>
+  <widget class="QMenuBar" name="menubar">
+   <widget class="QMenu" name="fileMenu">
+    <property name="title"><string>&amp;File</string></property>
+    <addaction name="actionQuit"/>
+   </widget>
+   <widget class="QMenu" name="settingsMenu">
+    <property name="title"><string>&amp;Settings</string></property>
+    <addaction name="actionSettings"/>
+   </widget>
+   <addaction name="fileMenu"/>
+   <addaction name="settingsMenu"/>
+  </widget>
+  <action name="actionQuit">
+   <property name="text"><string>&amp;Quit</string></property>
+   <property name="shortcut"><string>Ctrl+Q</string></property>
+  </action>
+  <action name="actionSettings">
+   <property name="text"><string>&amp;Preferences…</string></property>
+   <property name="shortcut"><string>Ctrl+,</string></property>
+  </action>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

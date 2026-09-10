@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>SettingsDialog</class>
+ <widget class="QDialog" name="SettingsDialog">
+  <property name="geometry"><rect><x>0</x><y>0</y><width>800</width><height>600</height></rect></property>
+  <property name="windowTitle"><string>Settings — N=2 Landscape</string></property>
+  <layout class="QVBoxLayout" name="dialogLayout">
+   <property name="spacing"><number>16</number></property>
+   <item>
+    <widget class="QGroupBox" name="cacheGroup">
+     <property name="title"><string>Cache databases</string></property>
+     <layout class="QGridLayout" name="cacheLayout">
+      <item row="0" column="0"><widget class="QLabel" name="characterCacheLabel"><property name="text"><string>Character decomposition</string></property><property name="buddy"><cstring>characterCacheEdit</cstring></property></widget></item>
+      <item row="0" column="1"><widget class="QLineEdit" name="characterCacheEdit"><property name="placeholderText"><string>char_decomposition_cache.db</string></property></widget></item>
+      <item row="0" column="2"><widget class="QPushButton" name="characterCacheBrowse"><property name="text"><string>Browse…</string></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="formCacheLabel"><property name="text"><string>FORM expansion</string></property><property name="buddy"><cstring>formCacheEdit</cstring></property></widget></item>
+      <item row="1" column="1"><widget class="QLineEdit" name="formCacheEdit"><property name="placeholderText"><string>form_expansion_cache.db</string></property></widget></item>
+      <item row="1" column="2"><widget class="QPushButton" name="formCacheBrowse"><property name="text"><string>Browse…</string></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="mysqlGroup">
+     <property name="title"><string>N=2 landscape database · MySQL</string></property>
+     <layout class="QFormLayout" name="mysqlLayout">
+      <property name="fieldGrowthPolicy"><enum>QFormLayout::AllNonFixedFieldsGrow</enum></property>
+      <item row="0" column="0"><widget class="QLabel" name="databaseLabel"><property name="text"><string>Database name</string></property><property name="buddy"><cstring>databaseEdit</cstring></property></widget></item>
+      <item row="0" column="1"><widget class="QLineEdit" name="databaseEdit"><property name="placeholderText"><string>Name of an existing database</string></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="hostLabel"><property name="text"><string>Host</string></property><property name="buddy"><cstring>hostEdit</cstring></property></widget></item>
+      <item row="1" column="1"><widget class="QLineEdit" name="hostEdit"><property name="text"><string>127.0.0.1</string></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="portLabel"><property name="text"><string>Port</string></property><property name="buddy"><cstring>portSpin</cstring></property></widget></item>
+      <item row="2" column="1"><widget class="QSpinBox" name="portSpin"><property name="minimum"><number>1</number></property><property name="maximum"><number>65535</number></property><property name="value"><number>3306</number></property></widget></item>
+      <item row="3" column="0"><widget class="QLabel" name="userLabel"><property name="text"><string>User name</string></property><property name="buddy"><cstring>userEdit</cstring></property></widget></item>
+      <item row="3" column="1"><widget class="QLineEdit" name="userEdit"><property name="text"><string>root</string></property></widget></item>
+      <item row="4" column="0"><widget class="QLabel" name="passwordLabel"><property name="text"><string>Password</string></property><property name="buddy"><cstring>passwordEdit</cstring></property></widget></item>
+      <item row="4" column="1"><widget class="QLineEdit" name="passwordEdit"><property name="echoMode"><enum>QLineEdit::Password</enum></property></widget></item>
+      <item row="5" column="0"><widget class="QLabel" name="connectTimeoutLabel"><property name="text"><string>Connection timeout</string></property><property name="buddy"><cstring>connectTimeoutSpin</cstring></property></widget></item>
+      <item row="5" column="1"><widget class="QSpinBox" name="connectTimeoutSpin"><property name="suffix"><string> s</string></property><property name="minimum"><number>1</number></property><property name="maximum"><number>31536000</number></property><property name="value"><number>10</number></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="toolsGroup">
+     <property name="title"><string>Computation tools</string></property>
+     <layout class="QGridLayout" name="toolsLayout">
+      <item row="0" column="0"><widget class="QLabel" name="lieLabel"><property name="text"><string>LiE executable</string></property><property name="buddy"><cstring>lieEdit</cstring></property></widget></item>
+      <item row="0" column="1"><widget class="QLineEdit" name="lieEdit"><property name="text"><string>lie</string></property><property name="toolTip"><string>Executable name on PATH or a full file path.</string></property></widget></item>
+      <item row="0" column="2"><widget class="QPushButton" name="lieBrowse"><property name="text"><string>Browse…</string></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="formLabel"><property name="text"><string>FORM executable</string></property><property name="buddy"><cstring>formEdit</cstring></property></widget></item>
+      <item row="1" column="1"><widget class="QLineEdit" name="formEdit"><property name="text"><string>form</string></property><property name="toolTip"><string>Executable name on PATH or a full file path.</string></property></widget></item>
+      <item row="1" column="2"><widget class="QPushButton" name="formBrowse"><property name="text"><string>Browse…</string></property></widget></item>
+      <item row="2" column="0"><widget class="QLabel" name="timeoutLabel"><property name="text"><string>LiE / FORM timeout</string></property><property name="buddy"><cstring>timeoutSpin</cstring></property></widget></item>
+      <item row="2" column="1" colspan="2"><widget class="QDoubleSpinBox" name="timeoutSpin"><property name="toolTip"><string>Timeout in seconds for each LiE or FORM invocation.</string></property><property name="suffix"><string> s</string></property><property name="decimals"><number>2</number></property><property name="minimum"><double>0.010000000000000</double></property><property name="maximum"><double>2147483647.000000000000000</double></property><property name="value"><double>600.000000000000000</double></property></widget></item>
+     </layout>
+    </widget>
+   </item>
+   <item><spacer name="bottomSpacer"><property name="orientation"><enum>Qt::Vertical</enum></property><property name="sizeHint" stdset="0"><size><width>20</width><height>0</height></size></property></spacer></item>
+   <item><widget class="QDialogButtonBox" name="buttonBox"><property name="standardButtons"><set>QDialogButtonBox::Cancel|QDialogButtonBox::Ok</set></property></widget></item>
+  </layout>
+ </widget>
+ <tabstops>
+  <tabstop>characterCacheEdit</tabstop><tabstop>characterCacheBrowse</tabstop>
+  <tabstop>formCacheEdit</tabstop><tabstop>formCacheBrowse</tabstop>
+  <tabstop>databaseEdit</tabstop><tabstop>hostEdit</tabstop><tabstop>portSpin</tabstop>
+  <tabstop>userEdit</tabstop><tabstop>passwordEdit</tabstop><tabstop>connectTimeoutSpin</tabstop>
+  <tabstop>lieEdit</tabstop><tabstop>lieBrowse</tabstop><tabstop>formEdit</tabstop><tabstop>formBrowse</tabstop><tabstop>timeoutSpin</tabstop>
+ </tabstops>
+ <resources/>
+ <connections/>
+</ui>

@@ -1,0 +1,351 @@
+"""Isolated GUI checks; no real credentials, databases or user settings are used."""
+
+import ast
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PyQt6 import QtCore, QtWidgets
+
+# Support unittest discovery from both the repository root and gui/.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from gui.n2_db import (
+    N2DatabaseWindow, PROJECT_ROOT, SettingsDialog, SettingsStore, default_settings,
+)
+from gui.password_store import PasswordStorageError, PasswordVault
+
+
+class MemoryVault:
+    """Test double only: never accesses the user's actual credential vault."""
+
+    def __init__(self):
+        self.records = {}
+
+    def get(self, credential_id):
+        try:
+            return self.records[credential_id]
+        except KeyError:
+            raise PasswordStorageError("Test credential missing") from None
+
+    def set(self, credential_id, password):
+        self.records[credential_id] = password
+
+    def delete(self, credential_id):
+        self.records.pop(credential_id, None)
+
+
+def keyword_defaults(relative_path, function_name):
+    """Read real backend defaults without importing Sage or opening a cache."""
+    tree = ast.parse((PROJECT_ROOT / relative_path).read_text())
+    function = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == function_name
+    )
+    return {
+        arg.arg: ast.literal_eval(value)
+        for arg, value in zip(function.args.kwonlyargs, function.args.kw_defaults)
+        if isinstance(value, ast.Constant)
+    }
+
+
+class GuiTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="n2-gui-test-")
+        self.addCleanup(self.temp.cleanup)
+        self.vault = MemoryVault()
+        self.store = SettingsStore(
+            Path(self.temp.name) / "config" / "settings.ini", vault=self.vault,
+        )
+        self.env = patch.dict(os.environ, {
+            "N2_DB_HOST": "127.0.0.1", "N2_DB_USER": "root", "N2_DB_PASSWORD": "",
+        })
+        self.env.start()
+        self.addCleanup(self.env.stop)
+
+    def dialog(self):
+        dialog = SettingsDialog(self.store)
+        self.addCleanup(dialog.close)
+        return dialog
+
+    def test_defaults_match_current_backend(self):
+        values = default_settings()
+        mysql = keyword_defaults("common/n2_theory_db.py", "connect_database")
+        index = keyword_defaults("index/n2_theory_index.py", "calculate_index")
+        for field in ("host", "port", "user", "password", "connect_timeout"):
+            self.assertEqual(values[f"mysql/{field}"], mysql[field])
+        for field in ("lie_executable", "form_executable", "timeout"):
+            self.assertEqual(values[f"tools/{field}"], index[field])
+        self.assertEqual(values["mysql/database"], "")
+        for key, module, constant in (
+            ("cache/character_database", "char_decomposition_cache", "DEFAULT_CHAR_CACHE_DATABASE"),
+            ("cache/form_database", "form_expansion_cache", "DEFAULT_FORM_CACHE_DATABASE"),
+        ):
+            tree = ast.parse((PROJECT_ROOT / "index" / f"{module}.py").read_text())
+            assignment = next(
+                node for node in tree.body if isinstance(node, ast.Assign)
+                and any(isinstance(target, ast.Name) and target.id == constant
+                        for target in node.targets)
+            )
+            filename = ast.literal_eval(assignment.value.right)
+            self.assertEqual(values[key], str(PROJECT_ROOT / filename))
+        self.assertFalse(self.store.path.exists())
+
+    def test_empty_tabs_and_menu_opens_settings(self):
+        window = N2DatabaseWindow(self.store)
+        self.addCleanup(window.close)
+        self.assertEqual([window.tabs.tabText(i) for i in range(2)], ["anomaly", "index"])
+        self.assertEqual(window.tabs.count(), 2)
+        for i in range(2):
+            self.assertEqual(window.tabs.widget(i).findChildren(QtWidgets.QWidget), [])
+        observed = []
+
+        def close_dialog():
+            active = self.app.activeModalWidget()
+            observed.append(type(active))
+            if active:
+                active.reject()
+
+        QtCore.QTimer.singleShot(0, close_dialog)
+        window.actionSettings.trigger()
+        self.assertEqual(observed, [SettingsDialog])
+        self.assertFalse(self.store.path.exists())
+
+    def test_save_then_relaunch_in_fresh_process(self):
+        window = N2DatabaseWindow(self.store)
+        dialog = self.dialog()
+        values = {
+            "cache/character_database": str(Path(self.temp.name) / "캐시 chars.db"),
+            "cache/form_database": str(Path(self.temp.name) / "FORM cache.db"),
+            "mysql/database": "landscape_test", "mysql/host": "db.example.invalid",
+            "mysql/port": 3307, "mysql/user": "researcher",
+            "mysql/password": " fake secret = ; # 한글 ", "mysql/connect_timeout": 17,
+            "tools/lie_executable": "/example tools/lie",
+            "tools/form_executable": "/example tools/form", "tools/timeout": 123.75,
+        }
+        for key, field in dialog.text_fields.items():
+            field.setText(values[key])
+        for key, field in dialog.number_fields.items():
+            field.setValue(values[key])
+        self.assertEqual(dialog.passwordEdit.echoMode(), QtWidgets.QLineEdit.EchoMode.Password)
+        dialog.buttonBox.button(QtWidgets.QDialogButtonBox.StandardButton.Ok).click()
+        self.assertEqual(dialog.result(), QtWidgets.QDialog.DialogCode.Accepted)
+        window.close()
+        script = """
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from PyQt6 import QtWidgets
+from gui.n2_db import N2DatabaseWindow, SettingsDialog, SettingsStore
+from gui.test_n2_db import MemoryVault
+app = QtWidgets.QApplication([])
+fixture = json.load(sys.stdin)
+vault = MemoryVault()
+vault.records = fixture['vault']
+window = N2DatabaseWindow(SettingsStore(sys.argv[2], vault=vault))
+expected = fixture['settings']
+assert window.settings == expected
+dialog = SettingsDialog(window.store)
+for key, field in dialog.text_fields.items():
+    assert field.text() == expected[key], key
+for key, field in dialog.number_fields.items():
+    assert field.value() == expected[key], key
+dialog.close()
+window.close()
+"""
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", script, str(PROJECT_ROOT), str(self.store.path)],
+            input=json.dumps({"settings": values, "vault": self.vault.records}),
+            text=True, capture_output=True,
+            cwd=self.temp.name, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        if os.name == "posix":
+            self.assertEqual(stat.S_IMODE(self.store.path.stat().st_mode), 0o600)
+        self.assertFalse(Path(values["cache/character_database"]).exists())
+        self.assertFalse(Path(values["cache/form_database"]).exists())
+        self.assertNotIn(values["mysql/password"].encode(), self.store.path.read_bytes())
+        self.assertFalse(self.store._read_preferences().contains("mysql/password"))
+
+    def test_cancel_discards_edits(self):
+        self.store.save(default_settings())
+        original = self.store.path.read_bytes()
+        dialog = self.dialog()
+        dialog.databaseEdit.setText("discard_me")
+        dialog.passwordEdit.setText("also discarded")
+        dialog.buttonBox.button(QtWidgets.QDialogButtonBox.StandardButton.Cancel).click()
+        self.assertEqual(self.store.path.read_bytes(), original)
+        self.assertEqual(self.store.load()["mysql/database"], "")
+
+    def test_environment_defaults_and_saved_values_take_precedence(self):
+        with patch.dict(os.environ, {
+            "N2_DB_HOST": "env.invalid", "N2_DB_USER": "env_user", "N2_DB_PASSWORD": "env_dummy",
+        }):
+            self.assertEqual(self.store.load()["mysql/host"], "env.invalid")
+            self.assertEqual(self.store.load()["mysql/user"], "env_user")
+            self.assertEqual(self.store.load()["mysql/password"], "env_dummy")
+        self.store.save(default_settings())
+        with patch.dict(os.environ, {"N2_DB_HOST": "changed.invalid", "N2_DB_PASSWORD": "changed_dummy"}):
+            self.assertEqual(self.store.load()["mysql/host"], "127.0.0.1")
+            self.assertEqual(self.store.load()["mysql/password"], "")
+
+    def test_file_pickers_and_relative_cache_paths(self):
+        dialog = self.dialog()
+        with patch.object(QtWidgets.QFileDialog, "getSaveFileName", return_value=("custom/cache.db", "")):
+            dialog.characterCacheBrowse.click()
+        with patch.object(QtWidgets.QFileDialog, "getOpenFileName", return_value=("/usr/bin/form", "")):
+            dialog.formBrowse.click()
+        self.assertEqual(dialog.characterCacheEdit.text(), "custom/cache.db")
+        self.assertEqual(dialog.formEdit.text(), "/usr/bin/form")
+        dialog.accept()
+        self.assertEqual(self.store.load()["cache/character_database"], str(PROJECT_ROOT / "custom/cache.db"))
+        self.assertFalse((PROJECT_ROOT / "custom/cache.db").exists())
+
+    def test_missing_fields_and_write_failures_keep_dialog_open(self):
+        dialog = self.dialog()
+        dialog.hostEdit.clear()
+        with patch.object(QtWidgets.QMessageBox, "warning") as warning:
+            dialog.accept()
+        warning.assert_called_once()
+        self.assertFalse(self.store.path.exists())
+        dialog.hostEdit.setText("127.0.0.1")
+        with patch.object(self.store, "save", side_effect=OSError("Read-only settings")):
+            with patch.object(QtWidgets.QMessageBox, "critical") as error:
+                dialog.accept()
+        error.assert_called_once()
+        self.assertNotEqual(dialog.result(), QtWidgets.QDialog.DialogCode.Accepted)
+        self.assertFalse(self.store.path.exists())
+
+    def test_plaintext_migration_preserves_password_and_removes_old_key(self):
+        legacy = QtCore.QSettings(str(self.store.path), QtCore.QSettings.Format.IniFormat)
+        legacy.setValue("mysql/password", " legacy dummy = # 비밀번호 ")
+        legacy.setValue("mysql/database", "previous_database")
+        legacy.setValue("future/setting", "preserved")
+        legacy.sync()
+        self.store.migrate_legacy_password()
+        self.assertEqual(self.store.load()["mysql/password"], " legacy dummy = # 비밀번호 ")
+        self.assertEqual(self.store.load()["mysql/database"], "previous_database")
+        settings = self.store._read_preferences()
+        self.assertFalse(settings.contains("mysql/password"))
+        self.assertTrue(settings.value("mysql/password_id", type=str))
+        self.assertEqual(settings.value("future/setting"), "preserved")
+        self.assertEqual(list(self.store.path.parent.iterdir()), [self.store.path])
+        self.assertNotIn(b"legacy dummy", self.store.path.read_bytes())
+
+    def test_failed_migration_retains_original_for_retry(self):
+        legacy = QtCore.QSettings(str(self.store.path), QtCore.QSettings.Format.IniFormat)
+        legacy.setValue("mysql/password", "legacy test password")
+        legacy.sync()
+        before = self.store.path.read_bytes()
+        with patch.object(self.vault, "set", side_effect=PasswordStorageError("Vault locked")):
+            with self.assertRaises(PasswordStorageError):
+                self.store.migrate_legacy_password()
+        self.assertEqual(self.store.path.read_bytes(), before)
+        self.assertEqual(self.vault.records, {})
+
+    def test_password_update_and_clearing_remove_previous_credentials(self):
+        values = default_settings()
+        values["mysql/password"] = "first dummy password"
+        self.store.save(values)
+        first_ids = set(self.vault.records)
+        values["mysql/password"] = "second dummy password"
+        self.store.save(values)
+        self.assertTrue(first_ids.isdisjoint(self.vault.records))
+        self.assertEqual(list(self.vault.records.values()), ["second dummy password"])
+        values["mysql/password"] = ""
+        self.store.save(values)
+        self.assertEqual(self.vault.records, {})
+        with patch.dict(os.environ, {"N2_DB_PASSWORD": "must not reappear"}):
+            self.assertEqual(self.store.load()["mysql/password"], "")
+
+    def test_failed_preferences_write_keeps_previous_password(self):
+        values = default_settings()
+        values["mysql/password"] = "previous dummy password"
+        self.store.save(values)
+        before = self.store.path.read_bytes()
+        original_credentials = dict(self.vault.records)
+        values["mysql/password"] = "new dummy password"
+        with patch.object(self.store, "_write_preferences", side_effect=OSError("Disk failure")):
+            with self.assertRaises(OSError):
+                self.store.save(values)
+        self.assertEqual(self.store.path.read_bytes(), before)
+        self.assertEqual(self.vault.records, original_credentials)
+        self.assertEqual(self.store.load()["mysql/password"], "previous dummy password")
+
+    def test_vault_failure_never_falls_back_to_plaintext(self):
+        values = default_settings()
+        values["mysql/password"] = "must not appear in files"
+        with patch.object(self.vault, "set", side_effect=PasswordStorageError("Vault unavailable")):
+            with self.assertRaises(PasswordStorageError):
+                self.store.save(values)
+        self.assertFalse(self.store.path.exists())
+        self.assertEqual(self.vault.records, {})
+
+    def test_missing_or_locked_vault_does_not_replace_saved_password(self):
+        values = default_settings()
+        values["mysql/password"] = "saved test password"
+        self.store.save(values)
+        before = self.store.path.read_bytes()
+        for message in ("Locked", "Missing"):
+            with patch.object(self.vault, "get", side_effect=PasswordStorageError(message)):
+                with patch.dict(os.environ, {"N2_DB_PASSWORD": "unsafe fallback"}):
+                    with self.assertRaises(PasswordStorageError):
+                        self.store.load()
+        self.assertEqual(self.store.path.read_bytes(), before)
+
+    def test_settings_profiles_have_independent_passwords(self):
+        other = SettingsStore(Path(self.temp.name) / "other.ini", vault=self.vault)
+        values = default_settings()
+        values["mysql/password"] = "first profile dummy"
+        self.store.save(values)
+        values["mysql/password"] = "second profile dummy"
+        other.save(values)
+        self.assertEqual(self.store.load()["mysql/password"], "first profile dummy")
+        self.assertEqual(other.load()["mysql/password"], "second profile dummy")
+
+    def test_vault_errors_are_sanitized_and_missing_entries_raise(self):
+        vault = PasswordVault()
+        with patch.object(vault, "_get_backend") as backend:
+            backend.return_value.set_password.side_effect = RuntimeError("secret-in-backend-error")
+            with self.assertRaises(PasswordStorageError) as error:
+                vault.set("test-id", "dummy")
+            self.assertNotIn("secret-in-backend-error", str(error.exception))
+            backend.return_value.get_password.return_value = None
+            with self.assertRaises(PasswordStorageError):
+                vault.get("missing-id")
+
+    def test_vault_checks_readback_before_confirming_write(self):
+        vault = PasswordVault()
+        with patch.object(vault, "_get_backend") as backend:
+            backend.return_value.get_password.return_value = "incorrect round trip"
+            with self.assertRaises(PasswordStorageError):
+                vault.set("test-id", "expected dummy password")
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux native backend")
+    def test_plaintext_backend_configuration_is_ignored(self):
+        from keyring.backends.SecretService import Keyring
+        with patch.dict(os.environ, {"PYTHON_KEYRING_BACKEND": "keyrings.alt.file.PlaintextKeyring"}):
+            vault = PasswordVault()
+            self.assertIsInstance(vault._get_backend(), Keyring)
+
+    def test_vault_read_error_is_reported_by_settings_menu(self):
+        window = N2DatabaseWindow(self.store)
+        self.addCleanup(window.close)
+        with patch.object(self.store, "load", side_effect=PasswordStorageError("Vault locked")):
+            with patch.object(QtWidgets.QMessageBox, "critical") as error:
+                window.actionSettings.trigger()
+        error.assert_called_once()
+
+
+if __name__ == "__main__":
+    unittest.main()
