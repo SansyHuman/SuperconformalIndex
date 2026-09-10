@@ -34,7 +34,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small\sffamily\color{muted}SUPERCONFORMALINDEX / REFERENCE}
-\fancyhead[R]{\small\sffamily\color{muted}9 September 2026}
+\fancyhead[R]{\small\sffamily\color{muted}10 September 2026}
 \fancyfoot[L]{\footnotesize\color{muted}Mathematics \& implementation \enspace | \enspace consolidated edition}
 \fancyfoot[R]{\small\thepage}
 \renewcommand{\headrulewidth}{0.3pt}
@@ -82,19 +82,20 @@ database persistence, and the planned Higgs-branch extension.
 This update adds a database relationship diagram, a catalog of all ten tables
 and their keys, and the full/half-hyper normalization rules. It documents the
 $5\to6$ migration, conditional legacy-JSON cleanup, and the separate migration
-still needed for old realization hashes. The validation snapshot is refreshed.
+still needed for old realization hashes. The database validation snapshot is retained below.
 \end{note}
 \vfill
 \begin{tabularx}{\textwidth}{@{}p{31mm}Y@{}}
 Snapshot & Base reference: 8 September 2026. Database and validation update:
-9 September 2026; \code{662ad31} plus working-tree changes.\\
+9 September 2026. Index/cache update: 10 September 2026; \code{0a402ec}.\\
 Consolidates & \code{index/n2_theory_index_Mathematical_Background.pdf}\newline
 and the previous \code{output/pdf/n2_implementation_reference_summary.pdf}.\\
-Status & Database structure checked against the current source; other package
+Status & Index/cache algorithms and validation refreshed, including the unlimited
+A32 profile. Database structure retains its version-6 update; unrelated package
 chapters retain the base reference snapshot.
 Higgs/Hall--Littlewood material is explicitly marked as proposed, not implemented.\\
-Editing scope & Documentation only. The legacy index-background PDF is retained;
-this consolidated reference supersedes it.\\
+Editing scope & Documentation only. The companion index-background PDF is also
+updated. Unrevised mathematical and package content is preserved.\\
 \end{tabularx}
 \end{titlepage}
 \hypersetup{pageanchor=true}
@@ -105,7 +106,7 @@ this consolidated reference supersedes it.\\
 Package & Responsibility & Read here\\\midrule
 \code{anomalies} & Cartan types, representations, full/half hypers, beta functions,
 local and conventional mod-two gauge anomalies. & \S\ref{sec:anomalies}\\
-\code{index} & FORM expansion, LiE gauge projection and cache; Coulomb PE/PL and
+\code{index} & FORM expansion, LiE partial decompositions and SQLite singlet cache; Coulomb PE/PL and
 full-index projection; future Higgs/flavor refinement. & \S\ref{sec:index}\\
 \code{common} & Property orchestration, flavor blocks, central charges, exact-number
 and FORM helpers, JSON and MySQL persistence. & \S\ref{sec:common}\\
@@ -470,30 +471,186 @@ the latter would change the PE and corrupt gauge projection.
 \src{LiE manual, character operations \cite{lie}; Sage character operations
 \cite{sage-chars}}
 
-\code{CharacterDecompositionCache} uses LiE Adams and tensor operations to obtain
-the coefficients in \eqref{eq:adams}. Requests are keyed by Cartan type, Dynkin
-labels and the complete Adams-power tuple $(n_1,n_2,\ldots)$. The weighted order
+A full-decomposition request identifies the Cartan type, Dynkin labels and the
+complete Adams-power tuple. Its weighted order is
 \begin{equation}
- w=\sum_{k\geq1}k n_k
+ w=\sum_{k\geq1}k n_k.
  \label{eq:adams-order}
 \end{equation}
-groups entries into files; it is not alone a unique cache key. For example,
-\code{A1/A1_dynkin_1_adams_order_2.json} can contain different tuples of weight two.
-Dependency reuse, in-memory lookups and persistent JSON avoid repeating LiE
-work. Batch requests can use worker processes; locks and atomic replacement
-preserve entries sharing a cache file.
+This is metadata, not a unique key: $(2,0)$ and $(0,1)$ have the same order but
+describe different virtual characters. Full decompositions remain available
+through \code{get_decomposition}; singlet requests use the smaller calculation below.
 
-For each gauge factor, tensor products of the resulting simple characters are
-decomposed and only the trivial-representation coefficient is retained:
+Normalized Haar integration and the product-group rule are unchanged:
 \begin{equation}
  \int_{G_a}\chi_\lambda(g_a)\,d\mu_a=\delta_{\lambda,0},\qquad
  \operatorname{mult}_{\mathbf1,G}\!\left(\boxtimes_aV_a\right)
  =\prod_a\operatorname{mult}_{\mathbf1,G_a}(V_a).
  \label{eq:haar}
 \end{equation}
-\code{_project_terms} performs this factorwise calculation without expanding all
-gauge torus monomials in FORM. $B_r,D_r$ continue to mean Spin representations,
-not a restriction to representations descending to $SO$ quotients.
+\code{_project_terms} groups formal products by simple gauge factor and requests
+one integer per distinct product. It multiplies these integers into the FORM
+coefficient. Empty products contribute one. $B_r,D_r$ continue to mean Spin
+representations, not a restriction to representations descending to $SO$ quotients.
+
+\subsubsection{Why two partial decompositions suffice}
+For irreducibles, Schur orthogonality and duality imply
+\begin{align*}
+ \int_G\chi_\lambda(g)\overline{\chi_\mu(g)}\,d\mu(g)&=\delta_{\lambda\mu},\qquad
+ \chi_{\mu^*}(g)=\overline{\chi_\mu(g)},\\
+ [\mathbf1](AB)&=\sum_\lambda a_\lambda b_{\lambda^*},\quad
+ A=\sum_\lambda a_\lambda\chi_\lambda,\quad B=\sum_\mu b_\mu\chi_\mu.
+\end{align*}
+Equivalently, $(V\otimes W)^G\simeq\operatorname{Hom}_G(V^*,W)$;
+$\operatorname{Hom}_G$ is the vector space of linear maps commuting with the group
+action. Schur's lemma gives one invariant for dual irreps and zero otherwise.
+Linearity extends the pairing to signed virtual characters.
+\src{Etingof, Corollary 35.9 and Proposition 32.1 \cite{etingof};
+Sage \code{inner_product()} and \code{dual()} \cite{sage-chars}. The displayed
+contraction follows by substituting the character expansions.}
+
+\clearpage
+\subsubsection{Projection helpers: inputs, outputs and control flow}
+\begin{tabularx}{\textwidth}{@{}p{66mm}Y@{}}
+\toprule Helper & Role in the revised algorithm\\\midrule
+\code{_dual_permutation(algebra)} & Cache the permutation of fundamental weights
+induced by $-w_0$. Apply it to general labels without constructing a new Sage
+character for each output irrep.\\
+\code{_singlet_pair(algebra, left, right)} & Return
+$\sum a_\lambda b_{\lambda^*}$ by looking up dual labels; iterate over the
+smaller dictionary. Zero and scalar-trivial factors have direct shortcuts.\\
+\code{_split_character_product} & Expand powers into individual Adams factors,
+then greedily balance two symbolic partial products.\\
+\code{_character_singlets} & Plan needed partial decompositions, prefetch
+same-base-irrep products, expand mixed parts and contract the two sides.\\
+\code{_tensor_decompositions} & Ask LiE for a full \emph{intermediate} tensor
+product; never perform the final pairing this way.\\
+\code{_compute_singlet_multiplicities} & Handle already-decomposed inputs:
+sort by dictionary size, recursively build two parts, and pair dual irreps.\\\bottomrule
+\end{tabularx}
+
+An input factor \code{(labels, (n1,n2,...))} means
+$\prod_j\psi^j(R)^{n_j}$. The splitter assigns each individual $\psi^j(R)$ the
+estimated cost $j\max(1,\sum_i\lambda_i)$. It sorts largest first and puts the
+next factor on the lighter side; a tie favors an existing copy of the same base
+irrep. Repeated factors may separate, while a single Adams operation stays intact.
+This is a project heuristic, not an optimality theorem.
+
+Inside \code{_character_singlets}, \code{plan()} recursively records the required
+mixed splits and collects requests involving only one base irrep. The existing
+\code{get_decompositions()} cache and process pool supply these requests.
+\code{expand()} then builds mixed parts with LiE and reuses them in the
+thread-local \code{partial_products} dictionary. Only the complete product's
+final integer is persisted in the singlet table; mixed partial decompositions
+are memory-only. Trivial base irreps are removed from the calculation because
+$\psi^j(\mathbf1)=\mathbf1$.
+
+\begin{note}{Duality is not conjugate canonicalization}
+For $A_2$, $(a,b)^*=(b,a)$; for $A_r$, the label order reverses. The general
+permutation is obtained from the existing Sage duality helper and cached.
+Actual conjugate orientations remain distinct in character keys. For example,
+$[\mathbf1](\mathbf3\otimes\overline{\mathbf3})=1$, whereas
+$[\mathbf1](\mathbf3\otimes\mathbf3)=0$ for $SU(3)$.
+A pseudoreal irrep pairs with itself with coefficient $+1$; its
+Frobenius--Schur sign is not inserted into this tensor pairing.
+\end{note}
+For four $SU(2)$ doublets, decompose the two pairs as
+$\mathbf2\otimes\mathbf2=\mathbf1\oplus\mathbf3$. The final singlet is
+$1\cdot1+1\cdot1=2$, without decomposing the complete four-factor product.
+The final lookup costs $O(r\min(N_A,N_B))$ label operations for rank $r$ and
+support sizes $N_A,N_B$; constructing the partial decompositions can still dominate.
+
+\clearpage
+\subsubsection{SQLite schema, exact keys and cache lifetime}
+Both caches use \code{sqlite3} and default to
+\code{<project-root>/char_decomposition_cache.db}. The independent cache schema
+has \code{PRAGMA user_version=1}; it is unrelated to MySQL theory schema version 6.
+\begin{tabularx}{\textwidth}{@{}p{49mm}Y@{}}
+\toprule Table & Columns and primary key\\\midrule
+\code{character_decompositions} & \code{algebra} \code{TEXT},
+\code{dynkin_labels} \code{TEXT}, \code{adams_powers} \code{TEXT},
+\code{adams_order} \code{INTEGER}, \code{terms_json} \code{TEXT}.\newline
+Primary key: \code{(algebra, dynkin_labels, adams_powers)}.\\[4pt]
+\code{singlet_coefficients} & \code{algebra} \code{TEXT},
+\code{product_key} \code{TEXT}, \code{coefficient} \code{TEXT}.\newline
+Primary key: \code{(algebra, product_key)}.\\\bottomrule
+\end{tabularx}
+All columns are \code{NOT} \code{NULL}; both tables use \code{WITHOUT} \code{ROWID}.
+Dynkin labels and canonical powers are compact JSON text. Coefficients are signed
+decimal strings, preserving integers beyond SQLite's 64-bit integer storage
+range \cite{sqlite-types}. A decomposition payload is a list of
+\code{[labels, "coefficient"]} pairs, not a separate JSON cache file.
+
+\code{_canonical_product} merges repeated labels by adding Adams exponents and
+sorts factors in descending label order. A symbolic key has the shape
+\code{["characters", canonical_product]}. Already-decomposed inputs use a distinct
+\code{["decompositions", sorted_encoded_factors]} namespace. The algebra is always
+part of the SQL key. Product gauge groups reuse simple-factor entries.
+
+\code{get_singlet_multiplicities()} checks memory and then SQLite before requesting
+any decomposition. On a miss it invokes \code{_character_singlets()}, saves the
+integer and returns results in input order. Cached zero and negative values are
+valid hits. \code{get_decomposition()} returns a copy of a stored dictionary;
+\code{get_decompositions()} batches missing prerequisites by tensor-factor count.
+Their full-decomposition algorithm remains available to explicit callers.
+
+\subsubsection{Concurrency and failure boundaries}
+Each thread owns its connection and memory caches. A PID check avoids using an
+inherited connection; the process-pool parent closes its connection before
+starting workers, then writes completed results by dependency level. Sequential
+batches flush at 64 entries and at completion. LiE calculations do not run inside
+write transactions. Failed calculations do not insert a guessed zero.
+
+WAL permits readers alongside a writer, but still serializes writers; it assumes
+a local filesystem \cite{sqlite-wal}. The code sets a 30-second busy timeout and
+retries busy/locked operations. Python's connection context manager controls
+commit/rollback; this class's \code{close()} and context manager also close the
+connection and clear local caches \cite{python-sqlite}.
+
+\code{cache_directory=} selects a directory for the default filename;
+\code{database_path=} selects an explicit file. They are mutually exclusive.
+The CLI exposes \code{--cache-directory} and \code{--cache-database}.
+Legacy JSON discovery/import and \code{cache_path()} have been removed. Existing
+SQLite entries and keys remain valid; the projection update needs no migration.
+
+\clearpage
+\subsubsection{Validation, measured speedups and the remaining bottleneck}
+The temporary candidate was compared against commit \code{a9b7009} before
+promotion; the current implementation is committed in \code{0a402ec}.
+All seven comparative index cases agreed exactly, including product groups and
+half hypers. There were 319 matching singlet queries; 202 also matched independent
+$SU(2)$/$SU(3)$ weight calculations. All 216 dual-label comparisons across 18
+Cartan types matched Sage. All 4,996 old SQLite singlet entries tested were reused
+without recalculation. These are project measurements, not claims from the
+mathematical references.
+
+\begin{tabularx}{\textwidth}{@{}Yrrr@{}}
+\toprule Cold calculation & Previous (s) & Revised (s) & Speedup\\\midrule
+$A_8$, through $t^{18}$, projection & 4.599 & 0.849 & $5.42\times$\\
+$A_{16}$, through $t^{12}$, projection & 1.473 & 0.207 & $7.12\times$\\
+$A_{32}$, through $t^8$, projection & 0.469 & 0.117 & $4.01\times$\\
+$A_8$, through $t^{18}$, complete index & 6.213 & 2.443 & $2.54\times$\\\bottomrule
+\end{tabularx}
+These are three-trial medians with fresh SQLite files and one worker for SQCD
+with $2(r+1)$ full fundamental hypers. Warm A8 complete-index time stayed about
+1.70 s. Four-worker comparisons also agreed; small cases can incur process
+startup overhead. Reproduce with \code{test/benchmark_character_cache.py},
+\code{--baseline-ref} \code{a9b7009}, \code{--baseline-label} \code{existing},
+\code{--candidate-label} \code{sparse}.
+
+On 10 September, $A_{32}=SU(33)$ with 66 full fundamental hypers completed through
+$t^{18}$ with \code{timeout=None} and one worker: 94.293 s cold, 1.786 s warm.
+The two results matched exactly and contain 117 nonzero monomials. One LiE
+calculation of $\psi^3(\adj)^2$ took 82.699 s, or 87.7\% of the cold total.
+Each input contains 10 irrep terms; the output contains 91. FORM took 1.357 s,
+and all other LiE calls together took 5.066 s. This is one profiled run, not a
+median or an independent proof of every coefficient.
+
+The final pairing avoids the complete tensor decomposition but not every
+intermediate one: $\psi^3(\adj)^3$ splits as $\psi^3(\adj)^2$ and
+$\psi^3(\adj)$. That two-factor intermediate is the measured bottleneck.
+Detailed local evidence is in \code{output/benchmarks/singlet_projection_benchmark.md}
+and \code{output/benchmarks/a32_unlimited/report.md}.
 
 \subsubsection{Public result and a regression example}
 \code{calculate_index(data, order, ...)} returns an exact flat Sage Laurent
@@ -1248,6 +1405,7 @@ its rollback. No live database was changed for this documentation update.
 
 \clearpage
 \section{Package \texttt{test} and reproducible use}\label{sec:test}
+\begingroup\small
 {\small
 \begin{tabularx}{\textwidth}{@{}p{72mm}Y@{}}
 \toprule Selected test modules & Main coverage\\\midrule
@@ -1265,7 +1423,13 @@ transactions; actual index equality through $t^6$.\\\bottomrule
 \end{tabularx}}
 
 \subsection{Validation snapshot}
-The recorded 9 September 2026 run after the database fix completed in 9.507 s:
+The post-projection run on 9 September 2026 completed in 11.461 s:
+\textbf{170 tests run, 168 passed, 2 skipped}. The cache tests cover persistence
+and concurrent access; seven new \code{test_singlet_projection.py} regressions
+cover signed pairings, independent weights, grouped/mixed products and parallel
+execution. Detailed benchmarks appear in the revised index chapter.
+
+\textbf{Earlier database snapshot (retained).} The recorded 9 September 2026 run after the database fix completed in 9.507 s:
 \begin{center}
 {\large\sffamily\color{accent}134 tests run: 132 passed, 2 skipped.}
 \end{center}
@@ -1294,6 +1458,7 @@ source precision. Non-Lagrangian counting needs explicit ring/freeness assumptio
 Higgs work needs an HL/Hilbert-series justification; flavor refinement must
 preserve characters through gauge projection. These are mathematical contracts.
 
+\endgroup
 \clearpage
 \section*{References and equation provenance}
 \addcontentsline{toc}{section}{References and equation provenance}
@@ -1301,7 +1466,8 @@ Equation numbers in this document are local. Citations near equations identify
 the primary source or software reference; algebraic recurrences, cutoff rules
 and function mappings are derived from the inspected project source. Literature
 section/equation numbers refer to the linked arXiv editions where specified.
-Software documentation was consulted on 8 September 2026. This bibliography
+Base software documentation was consulted on 8 September 2026; the new
+orthogonality, Sage duality and SQLite references were checked on 10 September. This bibliography
 also retains the relevant sources from both earlier summaries.
 
 \begin{thebibliography}{99}
@@ -1417,5 +1583,20 @@ constraint-counting derivation.
 Functions for Hilbert Series}, JHEP 10 (2014) 152.
 \href{https://arxiv.org/abs/1408.4690}{arXiv:1408.4690}.
 Representation-level organization of refined Hilbert series.
+
+\bibitem{etingof} P. Etingof, \emph{Lie Groups and Lie Algebras}, MIT 18.755
+lecture notes (2024), Proposition 32.1 (dual highest weights) and Corollary 35.9
+(character orthogonality).
+\href{https://ocw.mit.edu/courses/18-755-lie-groups-and-lie-algebras-ii-spring-2024/mit18_755_s24_lec_full.pdf}{Official MIT lecture notes}.
+
+\bibitem{sqlite-wal} SQLite, \emph{Write-Ahead Logging}, especially \S2.2
+Concurrency. \href{https://www.sqlite.org/wal.html}{Official WAL documentation}.
+
+\bibitem{sqlite-types} SQLite, \emph{Datatypes In SQLite}, \S2 Storage Classes
+and Datatypes. \href{https://www.sqlite.org/datatype3.html}{Official datatype documentation}.
+
+\bibitem{python-sqlite} Python Software Foundation, \emph{sqlite3: DB-API 2.0
+interface for SQLite databases}; connections, transactions and thread checks.
+\href{https://docs.python.org/3/library/sqlite3.html}{Official Python documentation}.
 \end{thebibliography}
 \end{document}
