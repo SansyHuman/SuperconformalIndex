@@ -1,0 +1,12 @@
+{
+  "completed_utc": "2026-09-10T08:16:37.832295+00:00",
+  "decomposition_cases": 130,
+  "full_index_timed_runs": 72,
+  "targeted_timed_runs": 120,
+  "exact_comparisons_passed": true,
+  "focused_tests": 44,
+  "full_suite_tests": 197,
+  "full_suite_passed": 195,
+  "full_suite_skipped": 2,
+  "full_suite_seconds": 14.539
+}

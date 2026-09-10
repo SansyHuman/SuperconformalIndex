@@ -1,0 +1,511 @@
+[
+  {
+    "case": "A1-fund",
+    "api": "batch",
+    "target": [
+      2,
+      2
+    ],
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.02279499699943699,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.02255383699957747,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.02258882600290235,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.022845293991849758,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.02286200600792654,
+          "calls": {
+            "tensor": 2
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.021332584001356736,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.021230736005236395,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.021309408999513835,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.021635953002260067,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.02160091500263661,
+          "calls": {
+            "tensor": 1
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.02279499699943699,
+      "new": 0.021332584001356736
+    },
+    "equal": true,
+    "speedup": 1.0685530172053814
+  },
+  {
+    "case": "A2-adjoint",
+    "api": "batch",
+    "target": [
+      2,
+      2
+    ],
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.02302509400760755,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.023355195997282863,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.022834984003566206,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.02294423601415474,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.02317142799438443,
+          "calls": {
+            "tensor": 2
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.021476473993971013,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.021423261001473293,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.02163226700213272,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.021522612994886003,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.021378802994149737,
+          "calls": {
+            "tensor": 1
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.02302509400760755,
+      "new": 0.021476473993971013
+    },
+    "equal": true,
+    "speedup": 1.0721077405011303
+  },
+  {
+    "case": "C2-fund",
+    "api": "batch",
+    "target": [
+      2,
+      2
+    ],
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.022835244992165826,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.02291179400344845,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.023010105011053383,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.02313924599729944,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.02291681300266646,
+          "calls": {
+            "tensor": 2
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.02141050499631092,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.02156135899713263,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.02151053999841679,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.02135371501208283,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.021536801010370255,
+          "calls": {
+            "tensor": 1
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.02291681300266646,
+      "new": 0.02151053999841679
+    },
+    "equal": true,
+    "speedup": 1.0653759972717176
+  },
+  {
+    "case": "G2-fund",
+    "api": "batch",
+    "target": [
+      2,
+      2
+    ],
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.023001698005828075,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.023389310998027213,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.023336989994277246,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.022973233004449867,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.023278356005903333,
+          "calls": {
+            "tensor": 2
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.02182188599545043,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.021395415998995304,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.021583572000963613,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.021376279008109123,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.021690529989427887,
+          "calls": {
+            "tensor": 1
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.023278356005903333,
+      "new": 0.021583572000963613
+    },
+    "equal": true,
+    "speedup": 1.0785219427471993
+  },
+  {
+    "case": "A4-adjoint",
+    "api": "batch",
+    "target": [
+      2,
+      2
+    ],
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.023130087996833026,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.023253387000295334,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.023858714994275942,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.022463582005002536,
+          "calls": {
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.02318790000572335,
+          "calls": {
+            "tensor": 2
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.02248085600149352,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.02252949000103399,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.022890392006956972,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.022612041007960215,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.022380050009815022,
+          "calls": {
+            "tensor": 1
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.02318790000572335,
+      "new": 0.02252949000103399
+    },
+    "equal": true,
+    "speedup": 1.0292243634746787
+  },
+  {
+    "case": "A1-only-composite-rows",
+    "api": "batch",
+    "target": [
+      0,
+      2,
+      2
+    ],
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.024396448992774822,
+          "calls": {
+            "Adams": 1,
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.024706972995772958,
+          "calls": {
+            "Adams": 1,
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.024458339990815148,
+          "calls": {
+            "Adams": 1,
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.024634622008306906,
+          "calls": {
+            "Adams": 1,
+            "tensor": 2
+          }
+        },
+        {
+          "seconds": 0.024044044010224752,
+          "calls": {
+            "Adams": 1,
+            "tensor": 2
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.02115980800590478,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.02092022199940402,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.020931815000949427,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.020882349999737926,
+          "calls": {
+            "tensor": 1
+          }
+        },
+        {
+          "seconds": 0.021135400005732663,
+          "calls": {
+            "tensor": 1
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.024458339990815148,
+      "new": 0.020931815000949427
+    },
+    "equal": true,
+    "speedup": 1.1684767895046733
+  },
+  {
+    "case": "broad-exact",
+    "requests": 130,
+    "old": {
+      "seconds": 0.26036436000140384,
+      "calls": {
+        "Adams": 20,
+        "tensor": 110
+      }
+    },
+    "new": {
+      "seconds": 0.25471545101027004,
+      "calls": {
+        "Adams": 15,
+        "tensor": 110
+      }
+    },
+    "new_parallel": {
+      "seconds": 0.18979391299944837,
+      "calls": {}
+    },
+    "equal": true
+  }
+]

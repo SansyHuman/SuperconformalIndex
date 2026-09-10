@@ -458,63 +458,6 @@ class CharacterDecompositionCache:
             self._state()["decompositions"][request] = result
         return dict(result)
 
-    def _decomposition_dependencies(
-        self, algebra: str, labels: DynkinLabels, powers: AdamsPowers,
-    ) -> tuple[AdamsPowers, ...]:
-        """Prefer two cached factors when the usual split needs new work.
-
-        Keep the usual split when it already needs only one tensor product.
-        Otherwise inspect keys for this same algebra/irrep, and rank available
-        pairs by their numbers of irreducible terms. This estimates tensor
-        work; it is not an exact prediction of LiE's running time.
-        """
-        usual = _decomposition_dependencies(powers)
-        if not any(labels):
-            return ()
-        if sum(powers) <= 2:
-            return usual
-
-        def lookup(part):
-            if part == (1,):
-                return {labels: 1}
-            return self._lookup_decomposition((algebra, labels, part))
-
-        if all(lookup(part) is not None for part in usual):
-            return usual
-
-        rows = self._connection().execute(
-            "SELECT adams_powers FROM character_decompositions "
-            "WHERE algebra=? AND dynkin_labels=? AND adams_order<?",
-            (algebra, _json_key(labels), len(powers)),
-        )
-        available = {tuple(json.loads(row[0])) for row in rows}
-        available.update(
-            part for (group, weight, part) in self._state()["decompositions"]
-            if group == algebra and weight == labels and len(part) < len(powers)
-        )
-        available.add((1,))
-        best = None
-        for left in sorted(available):
-            remainder = list(powers)
-            for position, value in enumerate(left):
-                remainder[position] -= value
-            if any(value < 0 for value in remainder):
-                continue
-            right = _canonical_adams_powers(remainder)
-            if right not in available or left > right:
-                continue
-            a, b = lookup(left), lookup(right)
-            if a is None or b is None:
-                continue
-            # A zero or scalar factor is handled without LiE by the tensor helper.
-            zero = (0,) * len(labels)
-            scalar = (len(a) == 1 and zero in a) or (len(b) == 1 and zero in b)
-            cost = 0 if not a or not b or scalar else len(a) * len(b)
-            score = (cost, len(a) + len(b), left, right)
-            if best is None or score < best:
-                best = score
-        return usual if best is None else best[-2:]
-
     @contextmanager
     def _batch_decompositions(self):
         """Buffer completed results without holding a transaction during LiE."""
@@ -547,10 +490,8 @@ class CharacterDecompositionCache:
                 continue
             algebra, labels, powers = request
             by_level.setdefault(sum(powers), []).append(request)
-            pending.extend(
-                (algebra, labels, dependency)
-                for dependency in self._decomposition_dependencies(algebra, labels, powers)
-            )
+            pending.extend((algebra, labels, dependency)
+                           for dependency in _decomposition_dependencies(powers))
         if by_level:
             workers = min(self.max_workers or (os.cpu_count() or 1),
                           max(map(len, by_level.values())))
@@ -775,8 +716,6 @@ class CharacterDecompositionCache:
         powers: AdamsPowers,
     ) -> Decomposition:
         """Calculate decomposition of given Adams powers."""
-        if powers == (1,) or not any(labels):
-            return {labels: 1}
         level = sum(powers)
         if level == 1:
             adams = next(
@@ -786,11 +725,12 @@ class CharacterDecompositionCache:
             )
             expression = f"Adams({adams},{_format_labels(labels)},{algebra})"
         else:
-            left, right = self._decomposition_dependencies(algebra, labels, powers)
+            left, right = _decomposition_dependencies(powers)
             left_decomposition = self.get_decomposition(algebra, labels, left)
             right_decomposition = self.get_decomposition(algebra, labels, right)
-            return self._tensor_decompositions(
-                algebra, left_decomposition, right_decomposition,
+            expression = (
+                f"tensor({format_lie_decomposition(left_decomposition)},"
+                f"{format_lie_decomposition(right_decomposition)},{algebra})"
             )
 
         output = self._run_lie([expression])

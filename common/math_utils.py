@@ -198,3 +198,10 @@ def _solve_frobenius_model(model, variables, max_solutions):
         raise RuntimeError("CP-SAT stopped before finding or rejecting solutions")
 
     return collector.solutions
+
+# TODO: Write a function build_decomposition_cache in char_decomposition_cache.py.
+#  It will take a cartan type of the lie group, Dynkin label of the representation, and maximum Adams order.
+#  It will then compute all possible Adams power decomposition at each Adams order from 1 to maximum Adams order and save it to the database.
+#  Get all possible Adams power at given Adams order using common.math_utils.frobenius_solve.
+#  Optimize by calling Adams operator as little as possible like /home/subo-lee/PycharmProjects/N1Landscape/arxivGen.py did.
+#  Use process pool to speed up each order's calculation by dividing frobenius solutions at each order to processes.

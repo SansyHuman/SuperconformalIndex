@@ -143,7 +143,7 @@ class SQLiteCacheTests(unittest.TestCase):
     def test_failure_does_not_cache_a_false_zero(self):
         cache = self.cache(lie_executable='missing-lie')
         with self.assertRaises(RuntimeError):
-            cache.get_singlet_multiplicities('A1', 1, [[((1,), (1,))]])
+            cache.get_singlet_multiplicities('A1', 1, [[((1,), (0, 1))]])
         with sqlite3.connect(cache.database_path) as connection:
             self.assertEqual(connection.execute('SELECT count(*) FROM singlet_coefficients').fetchone()[0], 0)
 

@@ -1,0 +1,698 @@
+[
+  {
+    "case": "su2_4fund",
+    "state": "cold",
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.3854465869953856,
+          "calls": {
+            "Adams": 18,
+            "tensor": 87
+          }
+        },
+        {
+          "seconds": 0.2701168880012119,
+          "calls": {
+            "Adams": 18,
+            "tensor": 87
+          }
+        },
+        {
+          "seconds": 0.24751701299101114,
+          "calls": {
+            "Adams": 18,
+            "tensor": 87
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.2629205509874737,
+          "calls": {
+            "Adams": 16,
+            "tensor": 87
+          }
+        },
+        {
+          "seconds": 0.2889571749983588,
+          "calls": {
+            "Adams": 16,
+            "tensor": 87
+          }
+        },
+        {
+          "seconds": 0.2818098040006589,
+          "calls": {
+            "Adams": 16,
+            "tensor": 87
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.2701168880012119,
+      "new": 0.2818098040006589
+    },
+    "equal": true,
+    "speedup": 0.9585077742738161
+  },
+  {
+    "case": "su2_4fund",
+    "state": "from_t12",
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.2370015259948559,
+          "calls": {
+            "Adams": 6,
+            "tensor": 76
+          }
+        },
+        {
+          "seconds": 0.250771689999965,
+          "calls": {
+            "Adams": 6,
+            "tensor": 76
+          }
+        },
+        {
+          "seconds": 0.22743959299987182,
+          "calls": {
+            "Adams": 6,
+            "tensor": 76
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.23953809599333908,
+          "calls": {
+            "Adams": 6,
+            "tensor": 76
+          }
+        },
+        {
+          "seconds": 0.20996480900794268,
+          "calls": {
+            "Adams": 6,
+            "tensor": 76
+          }
+        },
+        {
+          "seconds": 0.20478827800252475,
+          "calls": {
+            "Adams": 6,
+            "tensor": 76
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.2370015259948559,
+      "new": 0.20996480900794268
+    },
+    "equal": true,
+    "speedup": 1.1287678497871063
+  },
+  {
+    "case": "su3_6fund",
+    "state": "cold",
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.8392894619901199,
+          "calls": {
+            "Adams": 27,
+            "tensor": 286
+          }
+        },
+        {
+          "seconds": 0.8410588839906268,
+          "calls": {
+            "Adams": 27,
+            "tensor": 286
+          }
+        },
+        {
+          "seconds": 0.8456421919981949,
+          "calls": {
+            "Adams": 27,
+            "tensor": 286
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.836028574994998,
+          "calls": {
+            "Adams": 24,
+            "tensor": 286
+          }
+        },
+        {
+          "seconds": 0.836244265010464,
+          "calls": {
+            "Adams": 24,
+            "tensor": 286
+          }
+        },
+        {
+          "seconds": 0.8118522900040261,
+          "calls": {
+            "Adams": 24,
+            "tensor": 286
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.8410588839906268,
+      "new": 0.836028574994998
+    },
+    "equal": true,
+    "speedup": 1.0060169103617767
+  },
+  {
+    "case": "su3_6fund",
+    "state": "from_t12",
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.7458631070039701,
+          "calls": {
+            "Adams": 9,
+            "tensor": 268
+          }
+        },
+        {
+          "seconds": 0.7767945569939911,
+          "calls": {
+            "Adams": 9,
+            "tensor": 268
+          }
+        },
+        {
+          "seconds": 0.7758064070076216,
+          "calls": {
+            "Adams": 9,
+            "tensor": 268
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.8070044500054792,
+          "calls": {
+            "Adams": 9,
+            "tensor": 268
+          }
+        },
+        {
+          "seconds": 0.799140618997626,
+          "calls": {
+            "Adams": 9,
+            "tensor": 268
+          }
+        },
+        {
+          "seconds": 0.7763026229949901,
+          "calls": {
+            "Adams": 9,
+            "tensor": 268
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.7758064070076216,
+      "new": 0.799140618997626
+    },
+    "equal": true,
+    "speedup": 0.9708008685389151
+  },
+  {
+    "case": "su5_10fund",
+    "state": "cold",
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.8916606709972257,
+          "calls": {
+            "Adams": 27,
+            "tensor": 286
+          }
+        },
+        {
+          "seconds": 0.8409256459999597,
+          "calls": {
+            "Adams": 27,
+            "tensor": 286
+          }
+        },
+        {
+          "seconds": 0.872138281003572,
+          "calls": {
+            "Adams": 27,
+            "tensor": 286
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.8703730569977779,
+          "calls": {
+            "Adams": 24,
+            "tensor": 286
+          }
+        },
+        {
+          "seconds": 0.8809969470021315,
+          "calls": {
+            "Adams": 24,
+            "tensor": 286
+          }
+        },
+        {
+          "seconds": 0.8711525469989283,
+          "calls": {
+            "Adams": 24,
+            "tensor": 286
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.872138281003572,
+      "new": 0.8711525469989283
+    },
+    "equal": true,
+    "speedup": 1.0011315285802005
+  },
+  {
+    "case": "su5_10fund",
+    "state": "from_t12",
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.7989907050068723,
+          "calls": {
+            "Adams": 9,
+            "tensor": 268
+          }
+        },
+        {
+          "seconds": 0.8048795229988173,
+          "calls": {
+            "Adams": 9,
+            "tensor": 268
+          }
+        },
+        {
+          "seconds": 0.8204007510066731,
+          "calls": {
+            "Adams": 9,
+            "tensor": 268
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.7971540660073515,
+          "calls": {
+            "Adams": 9,
+            "tensor": 268
+          }
+        },
+        {
+          "seconds": 0.7795550919981906,
+          "calls": {
+            "Adams": 9,
+            "tensor": 268
+          }
+        },
+        {
+          "seconds": 0.8120001139905071,
+          "calls": {
+            "Adams": 9,
+            "tensor": 268
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.8048795229988173,
+      "new": 0.7971540660073515
+    },
+    "equal": true,
+    "speedup": 1.0096912972296055
+  },
+  {
+    "case": "sp2_6fund",
+    "state": "cold",
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.2939062530058436,
+          "calls": {
+            "Adams": 18,
+            "tensor": 87
+          }
+        },
+        {
+          "seconds": 0.3097201289929217,
+          "calls": {
+            "Adams": 18,
+            "tensor": 87
+          }
+        },
+        {
+          "seconds": 0.2831579040066572,
+          "calls": {
+            "Adams": 18,
+            "tensor": 87
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.2793785779940663,
+          "calls": {
+            "Adams": 16,
+            "tensor": 87
+          }
+        },
+        {
+          "seconds": 0.2830312779988162,
+          "calls": {
+            "Adams": 16,
+            "tensor": 87
+          }
+        },
+        {
+          "seconds": 0.2856211309990613,
+          "calls": {
+            "Adams": 16,
+            "tensor": 87
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.2939062530058436,
+      "new": 0.2830312779988162
+    },
+    "equal": true,
+    "speedup": 1.0384232268741438
+  },
+  {
+    "case": "sp2_6fund",
+    "state": "from_t12",
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.24365237000165507,
+          "calls": {
+            "Adams": 6,
+            "tensor": 76
+          }
+        },
+        {
+          "seconds": 0.21273736500006635,
+          "calls": {
+            "Adams": 6,
+            "tensor": 76
+          }
+        },
+        {
+          "seconds": 0.25815389600757044,
+          "calls": {
+            "Adams": 6,
+            "tensor": 76
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.24537914698885288,
+          "calls": {
+            "Adams": 6,
+            "tensor": 76
+          }
+        },
+        {
+          "seconds": 0.23815351400116924,
+          "calls": {
+            "Adams": 6,
+            "tensor": 76
+          }
+        },
+        {
+          "seconds": 0.24910496899974532,
+          "calls": {
+            "Adams": 6,
+            "tensor": 76
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.24365237000165507,
+      "new": 0.24537914698885288
+    },
+    "equal": true,
+    "speedup": 0.9929628209715953
+  },
+  {
+    "case": "g2_4fund",
+    "state": "cold",
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.2597320039931219,
+          "calls": {
+            "Adams": 18,
+            "tensor": 66
+          }
+        },
+        {
+          "seconds": 0.2760437480028486,
+          "calls": {
+            "Adams": 18,
+            "tensor": 66
+          }
+        },
+        {
+          "seconds": 0.25811565200274345,
+          "calls": {
+            "Adams": 18,
+            "tensor": 66
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.25385696499142796,
+          "calls": {
+            "Adams": 16,
+            "tensor": 66
+          }
+        },
+        {
+          "seconds": 0.22775188699597493,
+          "calls": {
+            "Adams": 16,
+            "tensor": 66
+          }
+        },
+        {
+          "seconds": 0.2505723220092477,
+          "calls": {
+            "Adams": 16,
+            "tensor": 66
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.2597320039931219,
+      "new": 0.2505723220092477
+    },
+    "equal": true,
+    "speedup": 1.036555042913064
+  },
+  {
+    "case": "g2_4fund",
+    "state": "from_t12",
+    "measurements": {
+      "old": [
+        {
+          "seconds": 0.22311409399844706,
+          "calls": {
+            "Adams": 6,
+            "tensor": 58
+          }
+        },
+        {
+          "seconds": 0.18888718099333346,
+          "calls": {
+            "Adams": 6,
+            "tensor": 58
+          }
+        },
+        {
+          "seconds": 0.24669615799211897,
+          "calls": {
+            "Adams": 6,
+            "tensor": 58
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 0.21362043199769687,
+          "calls": {
+            "Adams": 6,
+            "tensor": 58
+          }
+        },
+        {
+          "seconds": 0.218702479993226,
+          "calls": {
+            "Adams": 6,
+            "tensor": 58
+          }
+        },
+        {
+          "seconds": 0.21350808399438392,
+          "calls": {
+            "Adams": 6,
+            "tensor": 58
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 0.22311409399844706,
+      "new": 0.21362043199769687
+    },
+    "equal": true,
+    "speedup": 1.0444417320570372
+  },
+  {
+    "case": "su5_sym_asym",
+    "state": "cold",
+    "measurements": {
+      "old": [
+        {
+          "seconds": 4.428500401001656,
+          "calls": {
+            "Adams": 45,
+            "tensor": 977
+          }
+        },
+        {
+          "seconds": 4.568564989007427,
+          "calls": {
+            "Adams": 45,
+            "tensor": 977
+          }
+        },
+        {
+          "seconds": 4.559408208006062,
+          "calls": {
+            "Adams": 45,
+            "tensor": 977
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 4.394191592000425,
+          "calls": {
+            "Adams": 40,
+            "tensor": 977
+          }
+        },
+        {
+          "seconds": 4.553888426991762,
+          "calls": {
+            "Adams": 40,
+            "tensor": 977
+          }
+        },
+        {
+          "seconds": 4.584322829003213,
+          "calls": {
+            "Adams": 40,
+            "tensor": 977
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 4.559408208006062,
+      "new": 4.553888426991762
+    },
+    "equal": true,
+    "speedup": 1.001212102822191
+  },
+  {
+    "case": "su5_sym_asym",
+    "state": "from_t12",
+    "measurements": {
+      "old": [
+        {
+          "seconds": 4.415167782004573,
+          "calls": {
+            "Adams": 15,
+            "tensor": 951
+          }
+        },
+        {
+          "seconds": 4.360525116993813,
+          "calls": {
+            "Adams": 15,
+            "tensor": 951
+          }
+        },
+        {
+          "seconds": 4.432395351002924,
+          "calls": {
+            "Adams": 15,
+            "tensor": 951
+          }
+        }
+      ],
+      "new": [
+        {
+          "seconds": 4.313819158996921,
+          "calls": {
+            "Adams": 15,
+            "tensor": 951
+          }
+        },
+        {
+          "seconds": 4.503730795011506,
+          "calls": {
+            "Adams": 15,
+            "tensor": 951
+          }
+        },
+        {
+          "seconds": 4.323034562999965,
+          "calls": {
+            "Adams": 15,
+            "tensor": 951
+          }
+        }
+      ]
+    },
+    "median": {
+      "old": 4.415167782004573,
+      "new": 4.323034562999965
+    },
+    "equal": true,
+    "speedup": 1.021312163403263
+  }
+]
