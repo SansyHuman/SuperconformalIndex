@@ -3,12 +3,13 @@
 
 The input conventions agree with ``anomalies.check_n2_anomalies``. FORM expands
 the exact, truncated representation-valued plethystic exponential. LiE
-decomposes products of Adams-operated characters. The SQLite cache in
+decomposes Adams operations and intermediate character products; character
+orthogonality extracts the final singlet coefficient. The SQLite cache in
 ``index.char_decomposition_cache`` stores decompositions and final singlet
 coefficients using Cartan types, Dynkin labels and Adams powers.
 
 For a product gauge group, FORM keeps a separate formal character for each
-simple factor and LiE performs the singlet projection factor by factor.
+simple factor and singlet projection is performed factor by factor.
 """
 
 from __future__ import annotations

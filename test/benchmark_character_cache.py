@@ -1,4 +1,4 @@
-"""Benchmark the current SQLite cache against a frozen JSON-cache git revision.
+"""Benchmark the current character cache against a frozen git revision.
 
 Run with Sage Python. Cache directories are fresh for each backend and trial;
 'warm' uses a new client against that trial's persisted data. Comparisons use
@@ -24,7 +24,7 @@ from index import n2_theory_index as candidate_index
 
 
 def load_baseline(revision):
-    directory = tempfile.TemporaryDirectory(prefix='sci-json-baseline-')
+    directory = tempfile.TemporaryDirectory(prefix='sci-character-baseline-')
     path = Path(directory.name)
     for source_name, module_name in (
         ('char_decomposition_cache', 'original_cache'),
@@ -47,6 +47,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output-directory', type=Path, required=True)
     parser.add_argument('--baseline-ref', default='d4d103a')
+    parser.add_argument('--baseline-label', default='json')
+    parser.add_argument('--candidate-label', default='sqlite')
     parser.add_argument('--workers', type=int, default=1)
     parser.add_argument('--rounds', type=int, default=3)
     parser.add_argument('--suite', choices=['projection', 'full', 'decomposition'], default='projection')
@@ -56,6 +58,8 @@ def main():
     records = []
     if args.rounds < 1 or args.workers < 1:
         parser.error('rounds and workers must be positive')
+    if args.baseline_label == args.candidate_label:
+        parser.error('backend labels must be distinct')
     original_cache, original_index, baseline_directory = load_baseline(args.baseline_ref)
 
     def timed(operation):
@@ -100,7 +104,8 @@ def main():
                            for term in terms for c, powers in term.characters})
         reference = None
         for round_number in range(args.rounds):
-            backends = [('json', original_cache, original_index), ('sqlite', candidate_cache, candidate_index)]
+            backends = [(args.baseline_label, original_cache, original_index),
+                        (args.candidate_label, candidate_cache, candidate_index)]
             if round_number % 2:
                 backends.reverse()
             for backend, cache_module, index_module in backends:
@@ -145,8 +150,8 @@ def main():
         for phase in ('cold', 'warm'):
             times = {backend: median(r['seconds'] for r in records
                                      if r['case'] == name and r['backend'] == backend and r['phase'] == phase)
-                     for backend in ('json', 'sqlite')}
-            print(json.dumps(dict(case=name, phase=phase, median=times, speedup=times['json']/times['sqlite'])), flush=True)
+                     for backend in (args.baseline_label, args.candidate_label)}
+            print(json.dumps(dict(case=name, phase=phase, median=times, speedup=times[args.baseline_label]/times[args.candidate_label])), flush=True)
 
     baseline_directory.cleanup()
 

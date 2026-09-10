@@ -7,7 +7,11 @@ For an irreducible representation ``R`` and a tuple ``powers`` whose entry
 
 Decompositions and final singlet coefficients share a local SQLite database.
 Keys use Cartan types, Dynkin labels and Adams powers, independently of FORM
-character names.
+character names. On singlet-cache misses, split each character product before
+requesting decompositions and contract the two halves by character orthogonality:
+if A = sum a_lambda chi_lambda and B = sum b_mu chi_mu, the singlet coefficient
+of A*B is sum a_lambda b_(lambda dual). Only intermediate products are fully
+decomposed; the complete product is never tensor-decomposed for this projection.
 """
 
 from __future__ import annotations
@@ -15,6 +19,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import contextmanager
+from functools import lru_cache
 import json
 import os
 from pathlib import Path
@@ -138,6 +143,55 @@ def _canonical_product(algebra, product) -> CharacterProduct:
         ((labels, _canonical_adams_powers(powers)) for labels, powers in merged.items()),
         reverse=True,
     ))
+
+
+@lru_cache(maxsize=None)
+def _dual_permutation(algebra: str) -> tuple[int, ...]:
+    """Compute the -w0 permutation once using the project's duality convention."""
+    from anomalies.lie_algebra import conjugate_dynkin_labels, get_lie_algebra
+
+    group = get_lie_algebra(algebra)
+    result = []
+    for position in range(group.rank):
+        fundamental = tuple(int(i == position) for i in range(group.rank))
+        dual = conjugate_dynkin_labels(group, fundamental)
+        result.append(dual.index(1))
+    return tuple(result)
+
+
+def _singlet_pair(algebra: str, left: Decomposition, right: Decomposition) -> int:
+    """Exact coefficient of 1 in A*B, including signed virtual characters."""
+    if not left or not right:
+        return 0
+    if len(left) > len(right):
+        left, right = right, left
+    zero = (0,) * int(algebra[1:])
+    if len(left) == 1 and zero in left:
+        return left[zero] * right.get(zero, 0)
+    permutation = _dual_permutation(algebra)
+    return sum(coefficient * right.get(tuple(labels[i] for i in permutation), 0)
+               for labels, coefficient in left.items())
+
+
+def _split_character_product(algebra: str, product: CharacterProduct) -> tuple[CharacterProduct, CharacterProduct]:
+    """Greedily split Adams factors using j * sum(labels) as a cost estimate.
+
+    The estimate balances highest-weight sizes, not exact tensor complexity.
+    An individual Adams operation stays intact; repeated factors may separate.
+    """
+    atoms = [(labels, j, j * max(1, sum(labels)))
+             for labels, powers in product
+             for j, exponent in enumerate(powers, start=1)
+             for _ in range(exponent)]
+    atoms.sort(key=lambda item: (item[2], item[0], item[1]), reverse=True)
+    sides = [[], []]
+    weights = [0, 0]
+    for labels, adams, weight in atoms:
+        side = min(range(2), key=lambda i: (weights[i],
+                   not any(previous == labels for previous, _ in sides[i]), i))
+        sides[side].append((labels, (0,) * (adams - 1) + (1,)))
+        weights[side] += weight
+    return tuple(_canonical_product(algebra, side) for side in sides)
 
 
 def _initialize_decomposition_worker(
@@ -265,7 +319,7 @@ class CharacterDecompositionCache:
             if state is not None and state["connection"] is not None:
                 state["connection"].close()
             state = dict(pid=os.getpid(), connection=None, decompositions={},
-                         singlets={}, pending=None)
+                         singlets={}, partial_products={}, pending=None)
             self._local.state = state
         return state
 
@@ -504,6 +558,7 @@ class CharacterDecompositionCache:
         Each product contains ``(Dynkin labels, Adams powers)`` pairs for one
         simple factor. Repeated irreps are merged and factors sorted; conjugate
         irreps retain their actual orientation. Cached zeros are valid hits.
+        Misses use two partial decompositions and an exact dual-irrep pairing.
         """
         algebra = _canonical_cartan_type(cartan_type)
         if as_nonnegative_int(rank, "rank") != int(algebra[1:]):
@@ -513,12 +568,7 @@ class CharacterDecompositionCache:
         found = self._lookup_singlets(algebra, keys)
         missing = {key: product for key, product in zip(keys, products) if key not in found}
         if missing:
-            requests = sorted({(algebra, labels, powers)
-                               for product in missing.values() for labels, powers in product})
-            decompositions = dict(zip(requests, self.get_decompositions(requests), strict=True))
-            expanded = [[decompositions[algebra, labels, powers] for labels, powers in product]
-                        for product in missing.values()]
-            values = self._compute_singlet_multiplicities(algebra, rank, expanded)
+            values = self._character_singlets(algebra, rank, list(missing.values()))
             entries = dict(zip(missing, values, strict=True))
             self._write_singlets(algebra, entries)
             found.update(entries)
@@ -547,52 +597,117 @@ class CharacterDecompositionCache:
             found.update(entries)
         return [found[key] for key in keys]
 
+    def _tensor_decompositions(
+        self, algebra: str, left: Decomposition, right: Decomposition,
+    ) -> Decomposition:
+        """Decompose an intermediate product; never used for the final pairing."""
+        if not left or not right:
+            return {}
+        zero = (0,) * int(algebra[1:])
+        if set(left) == {zero}:
+            return {labels: left[zero] * value for labels, value in right.items()
+                    if left[zero] * value}
+        if set(right) == {zero}:
+            return {labels: right[zero] * value for labels, value in left.items()
+                    if right[zero] * value}
+        expression = f"tensor({format_lie_decomposition(left)},{format_lie_decomposition(right)},{algebra})"
+        output = self._run_lie([expression])
+        return parse_lie_decomposition("".join(output), len(zero))
+
+    def _character_singlets(
+        self, algebra: str, rank: int, products: Sequence[CharacterProduct],
+    ) -> list[int]:
+        """Split monomials before decomposition and pair their two halves.
+
+        Same-irrep partial products reuse the persistent decomposition cache.
+        Mixed partial products are memoized in this client's thread-local state.
+        Only the final scalar is persisted for the complete character product.
+        """
+        identity = {(0,) * rank: 1}
+        plans = {}
+        pure = set()
+        splits = []
+
+        def plan(product):
+            if not product or product in plans:
+                return
+            if len(product) == 1:
+                labels, powers = product[0]
+                pure.add((algebra, labels, powers))
+                plans[product] = None
+                return
+            left, right = _split_character_product(algebra, product)
+            plans[product] = left, right
+            plan(left)
+            plan(right)
+
+        for product in products:
+            # Adams operations preserve the trivial character.
+            product = tuple((labels, powers) for labels, powers in product if any(labels))
+            if sum(sum(powers) for _, powers in product) <= 1:
+                left, right = product, ()
+            else:
+                left, right = _split_character_product(algebra, product)
+            splits.append((left, right))
+            plan(left)
+            plan(right)
+
+        requests = sorted(pure)
+        decompositions = dict(zip(requests, self.get_decompositions(requests), strict=True))
+        memory = self._state()["partial_products"]
+
+        def expand(product):
+            if not product:
+                return identity
+            if len(product) == 1:
+                labels, powers = product[0]
+                return decompositions[algebra, labels, powers]
+            key = algebra, product
+            if key not in memory:
+                left, right = plans[product]
+                memory[key] = self._tensor_decompositions(algebra, expand(left), expand(right))
+            return memory[key]
+
+        return [_singlet_pair(algebra, expand(left), expand(right)) for left, right in splits]
+
     def _compute_singlet_multiplicities(
-        self,
-        cartan_type: str,
-        rank: int,
+        self, cartan_type: str, rank: int,
         products: Sequence[Sequence[Decomposition]],
     ) -> list[int]:
-        """Return trivial-irrep coefficients for several tensor products.
-
-        Each item in ``products`` is a sequence of already decomposed virtual
-        representations.  All nontrivial queries are submitted to one LiE process.
-        """
+        """Contract two partial decompositions using character orthogonality."""
         algebra = _canonical_cartan_type(cartan_type)
-        zero = (0,) * int(rank)
-        results: list[int | None] = [None] * len(products)
-        expressions: list[str] = []
-        expression_positions: list[int] = []
+        identity = {(0,) * rank: 1}
+        memo = {}
 
-        for position, product in enumerate(products):
-            if any(not decomposition for decomposition in product):
-                results[position] = 0
-            elif not product:
-                results[position] = 1
-            elif len(product) == 1:
-                results[position] = product[0].get(zero, 0)
-            else:
-                expressions.append(self._singlet_expression(algebra, zero, product))
-                expression_positions.append(position)
+        def expand(factors):
+            if not factors:
+                return identity
+            if len(factors) == 1:
+                return factors[0]
+            key = tuple(sorted(self._encode_decomposition(factor) for factor in factors))
+            if key not in memo:
+                middle = len(factors) // 2
+                memo[key] = self._tensor_decompositions(
+                    algebra, expand(factors[:middle]), expand(factors[middle:]))
+            return memo[key]
 
-        if expressions:
-            output = self._run_lie(expressions)
-            if len(output) != len(expressions):
-                raise RuntimeError(
-                    f"LiE returned {len(output)} singlet results for "
-                    f"{len(expressions)} queries"
-                )
-            for position, value in zip(expression_positions, output, strict=True):
-                try:
-                    results[position] = int(value)
-                except ValueError as exc:
-                    raise RuntimeError(
-                        f"LiE returned a nonintegral singlet multiplicity: {value!r}"
-                    ) from exc
-
-        if any(value is None for value in results):
-            raise RuntimeError("internal error while collecting LiE singlet results")
-        return [int(value) for value in results]
+        results = []
+        for product in products:
+            factors = [{labels: value for labels, value in factor.items() if value}
+                       for factor in product]
+            if any(not factor for factor in factors):
+                results.append(0)
+                continue
+            if not factors:
+                results.append(1)
+                continue
+            if len(factors) == 1:
+                results.append(factors[0].get((0,) * rank, 0))
+                continue
+            factors.sort(key=lambda factor: (len(factor), self._encode_decomposition(factor)))
+            middle = len(factors) // 2
+            results.append(_singlet_pair(algebra, expand(factors[:middle]), expand(factors[middle:])))
+        return results
 
     def _calculate_decomposition(
         self,
@@ -622,28 +737,6 @@ class CharacterDecompositionCache:
         if not output:
             raise RuntimeError(f"LiE returned no result for {expression!r}")
         return parse_lie_decomposition("".join(output), len(labels))
-
-    def _singlet_expression(
-        self,
-        algebra: str,
-        zero: DynkinLabels,
-        product: Sequence[Decomposition],
-    ) -> str:
-        """Construct a LiE tensor expression for coefficient of singlet."""
-        polynomials = [format_lie_decomposition(item) for item in product]
-        if len(polynomials) == 2:
-            return (
-                f"tensor({polynomials[0]},{polynomials[1]},"
-                f"{_format_labels(zero)},{algebra})"
-            )
-
-        intermediate = f"tensor({polynomials[0]},{polynomials[1]},{algebra})"
-        for polynomial in polynomials[2:-1]:
-            intermediate = f"tensor({intermediate},{polynomial},{algebra})"
-        return (
-            f"tensor({intermediate},{polynomials[-1]},"
-            f"{_format_labels(zero)},{algebra})"
-        )
 
     def _run_lie(self, expressions: Sequence[str]) -> list[str]:
         """Execute LiE on given expressions."""
