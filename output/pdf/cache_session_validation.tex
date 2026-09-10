@@ -1,0 +1,93 @@
+% Shared local evidence, measured 10 September 2026.
+\clearpage
+\cacheheading{FORM cache measurements with character projection prefilled}
+The controlled comparison used nine theories at $t^{12}$ and $t^{18}$, one
+warmup and five measured repetitions per mode, with fresh clients and one worker.
+Both decompositions and final singlet coefficients were already filled.
+The character database was query-only and guards prohibited LiE execution.
+All 270 timed indices agreed exactly. Medians below are full calculation times
+in seconds, excluding setup and Python/Sage startup.
+
+\begin{tabularx}{\textwidth}{@{}Yrrrr@{}}
+\toprule Theory, through $t^{18}$ & Disabled & Miss/save & Hit & Speedup\\\midrule
+$SU(2)$, 4 fundamentals & 0.4323 & 0.4916 & 0.0617 & $7.00\times$\\
+$SU(3)$, 6 fundamentals & 1.7220 & 1.7959 & 0.2304 & $7.48\times$\\
+$SU(5)$, 10 fundamentals & 1.7265 & 1.7839 & 0.2648 & $6.52\times$\\
+$SU(3)$, 1 adjoint ($\mathcal N=4$) & 0.2808 & 0.3180 & 0.0429 & $6.54\times$\\
+$Sp(2)$, 6 fundamentals & 0.4434 & 0.4817 & 0.0634 & $7.00\times$\\
+$\operatorname{Spin}(8)$, 6 vectors & 0.4329 & 0.4848 & 0.0655 & $6.60\times$\\
+$G_2$, 4 fundamentals & 0.4418 & 0.4874 & 0.0640 & $6.90\times$\\
+$SU(2)^2$, 2 bifundamentals & 2.7421 & 2.7843 & 0.3251 & $8.44\times$\\
+$SU(5)$, symmetric + antisymmetric & 13.7565 & 14.1896 & 1.8771 & $7.33\times$\\\bottomrule
+\end{tabularx}
+All matter in this table is full hypermultiplets; $Sp(2)=USp(4)$. Disabled mode
+bypasses FORM SQLite and executes/parses FORM; miss/save begins with an
+initialized empty FORM database and includes serialization and insertion.
+Hit mode decodes an existing expansion with FORM execution forbidden. The
+speedup is disabled time divided by hit time. At $t^{12}$ the range was
+$3.23$--$6.92\times$. These are warm-filesystem measurements on this machine,
+not cold-disk or contention benchmarks. Evidence: \code{report.md},
+\code{results.json} and \code{benchmark.py} under
+\code{output/benchmarks/form_expansion_theories/}.
+
+\textbf{Cross-theory hits.} Two pairs share byte-identical programs:
+$SU(2)$ with four fundamentals and $G_2$ with four fundamentals;
+$Sp(2)$ with six fundamentals and $\operatorname{Spin}(8)$ with six vectors.
+Both directions at both orders gave eight passing reuse checks. The first
+theory executed FORM once; a new client for the second executed/parsed FORM
+zero times, decoded once, and left the database at one row. Each final index
+matched its own independent fresh-FORM result, while the paired final indices
+differed. A changed-program control missed as expected. See
+\code{cross_theory_reuse.md}, \code{cross_theory_reuse.json} and
+\code{check_cross_theory_reuse.py} in that same directory.
+
+\clearpage
+\cacheheading{I/O cost, decomposition planning and builder verification}
+A separate I/O benchmark used the 113,831-term $t^{18}$ expansion: a 589-byte
+program and 5,907,568-byte JSON payload (5.91 MB). Thirty measured repetitions
+followed three warmups, using SQLite WAL with synchronous FULL on the project
+filesystem. Medians are milliseconds:
+\begin{center}\begin{tabular}{lr}
+\toprule Operation & Median (ms)\\\midrule
+Serialize exact terms & 179.32\\
+SQLite insert and commit & 42.07\\
+Total save, excluding database initialization & 221.51\\
+SQLite read and fetch JSON & 3.08\\
+Reconstruct \code{IndexFormTerm} objects & 866.42\\
+Hit with an already open connection & 870.81\\
+Hit with a new client, including close & 894.65\\\bottomrule
+\end{tabular}\end{center}
+Initialization separately took 31.43 ms. No FORM execution/parsing is included;
+every round trip was checked exactly. Python reconstruction dominated loading.
+Individual component medians need not add to the median total. This is a
+single-process warm-filesystem test, not concurrent lock contention.
+Evidence: \code{output/benchmarks/form_expansion_cache_io/report.md},
+\code{timings.json} and \code{benchmark.py}.
+
+\textbf{Cached-factor planner.} The temporary candidate matched 130 products
+over $A_1$, $A_2$ fundamental/adjoint, $C_2$ and $G_2$ in serial and three-worker
+runs; $SU(2)$ cases also matched an independent weight oracle. Prepared-cache
+misses improved $1.31$--$1.72\times$ for the single-request API and
+$1.03$--$1.17\times$ for the batch API, reducing two tensor calls to one. A case
+with only composite entries also reduced one Adams call to zero. However, 72
+full-index comparisons over six theories, with FORM prefilled and either a cold
+character cache or a cache filled through $t^{12}$, showed \emph{no consistent
+overall speedup}. All indices agreed and tensor-call counts were unchanged.
+The retained baseline, candidate, report, scripts and raw measurements are in
+\code{output/benchmarks/adams_cache_planner/}.
+
+\textbf{Complete builder.} Twelve regressions cover all 29 $SU(2)$ products
+through order six against independent weights, serial/parallel agreement for
+$A_1,A_2,C_2,G_2$ through order five, pool reuse, warm skips, partial-cache resume,
+failure persistence, input validation and both CLI entry points. A real worker
+log records exactly one Adams call at each of orders two through six and 23
+tensor calls, with multiple worker PIDs. This verifies the operation-count claim
+on the tested build; no broad prebuild speedup has been measured.
+
+The full suite rerun during this documentation update ran \textbf{209 tests: 207 passed and
+two live-MySQL tests skipped}. It uses actual Sage/FORM/LiE for backend tests;
+MySQL migration and insertion unit tests use mocks unless a test server is
+explicitly configured. The new modules are
+\code{test_form_expansion_cache.py}, \code{test_cached_decomposition_planning.py}
+and \code{test_build_decomposition_cache.py}. These measurements and algorithms
+are source-derived project evidence, not results attributed to external papers.

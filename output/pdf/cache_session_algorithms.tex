@@ -1,0 +1,209 @@
+% Shared by the two standalone PDF documents. The caller defines \cacheheading.
+% New displays are unnumbered to preserve the existing equation numbering.
+\clearpage
+\cacheheading{Persisting the FORM expansion before projection}
+\code{index/form_expansion_cache.py} now owns \code{IndexFormTerm}, the exact
+parser, and \code{FormExpansionCache}. For raw program text $P$, the stored value is
+the parsed list of monomials before any gauge projection:
+\[
+ P\longmapsto \left\{\left(c,\alpha,\beta,\gamma,
+        ((p,\mathbf n_p))_p\right)\right\},\qquad
+ c\,t^\alpha y^\beta u^\gamma\prod_{p,j}C_p(j)^{n_{p,j}}.
+\]
+This notation is a direct description of the project record format. Each
+\code{IndexFormTerm} has a \code{Fraction} coefficient, integer fugacity powers,
+and a tuple of character indices and Adams-power tuples. The compact JSON row is
+\code{["numerator", "denominator", t_power, y_power, u_power, characters]}.
+\code{_encode_expansion} stores a list of these rows; \code{_decode_expansion}
+restores exact arbitrary-size fractions and nested tuples. No float conversion
+or representation decomposition occurs in this layer.
+
+\begin{lstlisting}[language=SQL]
+CREATE TABLE form_expansions (
+    program TEXT COLLATE BINARY NOT NULL PRIMARY KEY,
+    expansion_json TEXT NOT NULL
+) WITHOUT ROWID;
+\end{lstlisting}
+The key is the complete program text, compared verbatim, not a hash. Whitespace,
+numeric multiplicities, symbol names and the truncation order matter. There is
+no program normalization or symbolic-multiplicity template. The default file is
+\code{form_expansion_cache.db}, separate from the character database; the FORM
+module does not set a separate \code{user_version}.
+
+\textbf{Lookup.} \code{get_expansion(program)} reads and decodes a hit. A miss
+runs \code{run_form}, calls \code{parse_form_output}, encodes the terms and
+commits with \code{ON CONFLICT (program) DO NOTHING}. Failed execution or parsing
+does not create an entry. Each thread opens its own connection, with a PID check
+before reusing it, WAL, a 30-second busy timeout and up to three attempts for
+busy/locked writes. FORM runs outside write transactions. Concurrent identical
+misses can execute FORM more than once, but retain only one complete row.
+The context manager closes the current thread's connection. These boundaries
+follow the implementation and SQLite's serialized-writer model \cite{sqlite-wal,python-sqlite}.
+
+\textbf{Index integration.} \code{calculate_index} and
+\code{calculate_index_internal} accept \code{form_cache_database_path=}; the
+index CLI exposes \code{--form-cache-database}. Otherwise the FORM database is
+placed beside the selected character database. A hit bypasses FORM execution
+and FORM-output parsing, while group-specific singlet projection still runs.
+Orders below two return the vacuum without external execution or cache access.
+
+Different theories can share this expansion when their raw programs are
+identical and they use the same FORM database. Group and irrep meanings are
+supplied afterward by each theory's character basis. Their final indices can
+therefore differ despite a shared expansion. This reuse applies to the supported
+non-$SU$ groups too; it does not require a power-sum/Schur integration backend.
+
+\clearpage
+\cacheheading{Reusing lower-order character decompositions}
+Write the cached virtual character as
+\[
+ D_R(\mathbf n)=\sum_\lambda d_\lambda\chi_\lambda
+   =\prod_{j\geq1}(\psi^j\chi_R)^{n_j},\qquad
+ q(\mathbf n)=\sum_j j n_j.
+\]
+If $\mathbf a+\mathbf b=\mathbf n$ componentwise, multiplication in the
+representation ring gives
+\[
+ D_R(\mathbf n)=D_R(\mathbf a)D_R(\mathbf b),\qquad
+ d_\nu=\sum_{\lambda,\mu}
+     a_\lambda b_\mu N_{\lambda\mu}^{\nu},
+ \quad \chi_\lambda\chi_\mu=\sum_\nu N_{\lambda\mu}^{\nu}\chi_\nu.
+\]
+The identity follows by multiplying the defining Adams products; LiE's
+\code{tensor} implements the last decomposition \cite[Sec.~4.5]{lie}.
+Signed coefficients remain valid. The two exact base cases are
+$D_R(\mathbf e_1)=\chi_R$ and $D_{\mathbf1}(\mathbf n)=1$;
+neither needs a LiE call.
+
+\code{CharacterDecompositionCache._decomposition_dependencies} first tries the
+usual split: remove one factor at the smallest occupied Adams index. For at most
+two factors, or when both usual dependencies are available, it retains that
+split. Otherwise it searches lower-weighted-order keys for the \emph{same}
+Cartan type and Dynkin labels, including thread-local entries and the known
+first Adams operation. It considers pairs already available whose padded
+exponent vectors sum to the requested vector.
+
+Among alternative pairs, the score is the product of the two numbers of
+irreducible terms, with zero cost for a zero or scalar-trivial factor. Ties use
+the total number of terms and then the vectors themselves. This estimates
+tensor work; it does not predict the fastest LiE call or find a globally optimal
+factorization. The batch dependency planner and the actual calculation use the
+same selection. Existing SQLite keys, schema and thread/process ownership are
+unchanged.
+
+For example, if $R^{\otimes2}$ and $(\psi^2R)^{\otimes2}$ are stored, their
+product can be obtained with one tensor operation on those entries. Atomic
+prerequisites need not be recalculated just to reconstruct a cached composite.
+On-demand generation still constructs missing prerequisites when no suitable
+cached split is available. It does not automatically enumerate all lower orders.
+
+\textbf{Scope.} This optimization is separate from the singlet splitter. The
+singlet path still decomposes two partial products and contracts dual labels;
+the new dependency choice helps construct the required same-irrep partial
+products. Intermediate full tensor decompositions can remain expensive even
+when all individual Adams operations have already been cached.
+
+\clearpage
+\cacheheading{Building every product through a chosen Adams order}
+\code{build_decomposition_cache(cartan_type, dynkin_labels, max_adams_order, ...)}
+in \code{index/char_decomposition_cache.py} fills the existing decomposition
+table for one base irrep. At weighted order $q$ it calls
+\code{common.math_utils.frobenius_solve(range(1, q + 1), q)} to enumerate
+\[
+ \mathcal P_q=\left\{(n_1,\ldots,n_q)\in\mathbb Z_{\geq0}^q:
+                 \sum_{j=1}^{q}j n_j=q\right\}.
+\]
+Each solution specifies one Adams product. This is also the multiplicity
+description of an integer partition: $|\mathcal P_q|=p(q)$, with counts
+$1,2,3,5,7,11$ at orders one through six (29 rows in total).
+
+Orders run sequentially. The builder reads existing keys at the current order,
+skips complete rows without decoding their payloads, and divides missing
+solutions into batches for a persistent \code{ProcessPoolExecutor} using
+\code{spawn}. Batches contain at most 64 requests, with several batches per
+worker to balance uneven costs. Workers read prerequisites and calculate;
+the parent commits each returned batch. It submits the next order only after
+the current one is fully committed. LiE never runs in a write transaction.
+Completed batches survive a later failure or interruption, so a rerun resumes
+from the missing entries. Independent builders may duplicate simultaneous
+misses; uniqueness and short transactions preserve complete stored rows.
+
+Every composite at order $q$ has a split into two strictly lower orders.
+Consequently both factors are already stored and at most one tensor operation
+is needed for that request, with scalar/zero shortcuts as usual. For an initially
+empty cache of a nontrivial irrep, one uninterrupted build needs only one
+individual Adams calculation per $j=2,\ldots,M$: $M-1$ in total. This counts
+logical Adams calculations, not backend retries or concurrent duplicate builds.
+The builder fills same-irrep decompositions, not singlet coefficients, mixed-irrep
+products or the FORM database.
+
+\textbf{Cutoff for the full index.} A letter starts at $t^2$, and its $j$-th
+Adams contribution starts no earlier than $t^{2j}$. For each base irrep in a
+fixed gauge factor, its product therefore satisfies
+\[
+ \deg_t\ \geq\ 2\sum_j j n_j=2q
+ \quad\Longrightarrow\quad
+ q\leq\left\lfloor\frac{N}{2}\right\rfloor
+ \quad\hbox{for an index through }t^N.
+\]
+This is a bound derived from the implemented single-letter functions. Use
+$M=\lfloor N/2\rfloor$ for each required adjoint and matter irrep, retaining
+distinct conjugate labels. It is a sufficient bound, not a claim that every
+partition will occur in the projector. For product groups it holds factorwise;
+one bifundamental letter contributes a character to multiple factors, so one
+must not sum their separate orders and apply the same bound to that sum.
+Through $t^{18}$, $M=9$ suffices. For $N<2$ there is no cache to prebuild.
+
+\clearpage
+\cacheheading{Builder API, dependencies and command-line examples}
+With Sage's environment active, prepare the $A_2$ fundamental through order nine:
+\begin{lstlisting}[language=bash]
+sage -python -m index.char_decomposition_cache A2 \
+  --dynkin-labels 1 0 --max-adams-order 9 --processes 4 \
+  --cache-database /tmp/index-demo/char_decomposition_cache.db
+\end{lstlisting}
+Repeat for every required irrep. For $A_2$ SQCD these include $(0,1)$ and the
+adjoint $(1,1)$ in addition to $(1,0)$. The group rank does not multiply the
+maximum Adams order. The direct script entry point
+\code{sage -python index/char_decomposition_cache.py ...} is also supported.
+
+\begin{lstlisting}[language=Python]
+from index.char_decomposition_cache import build_decomposition_cache
+
+if __name__ == "__main__":
+    totals = build_decomposition_cache(
+        "A2", (1, 0), 9, processes=4,
+        database_path="/tmp/index-demo/char_decomposition_cache.db",
+        progress=lambda q, total, computed:
+            print(q, total, computed),
+    )
+\end{lstlisting}
+The return value is \code{dict[int, int]} mapping each order to its total product count, including reused
+rows. The optional callback receives \code{(order, total, computed)} in the
+parent after that order is committed. \code{processes=1} is serial; the default
+is the available CPU count. The pool starts only when there is parallel work.
+Use a \code{__main__} guard in scripts with multiple processes.
+
+The maximum order and worker count must be positive integers. Cartan type,
+rank and Dynkin labels are validated. \code{cache_directory=} and
+\code{database_path=} are mutually exclusive. Other keywords are
+\code{lie_executable=} and \code{timeout=} (600 seconds per LiE call by default;
+Python accepts \code{None} for no timeout). The CLI provides
+\code{--max-order} as an alias for \code{--max-adams-order}, as well as
+\code{--cache-directory}, \code{--lie-executable}, and numeric \code{--timeout}.
+It prints computed/reused counts and exits with status 2 on a reported failure.
+
+The builder imports \code{frobenius_solve} lazily and therefore needs OR-Tools
+only when called; ordinary index/cache lookups do not acquire that dependency.
+Its enumeration and complete decompositions can grow much faster than the subset
+used by one index. Prebuilding is optional, and a fully warm repeat still
+enumerates solutions and checks keys even though it runs no LiE or worker pool.
+
+Use the prepared character database and a shared FORM database for index calls:
+\begin{lstlisting}[language=bash]
+sage -python -m index.n2_theory_index theory.json --order 18 \
+  --cache-database /tmp/index-demo/char_decomposition_cache.db \
+  --form-cache-database /tmp/index-demo/form_expansion_cache.db
+\end{lstlisting}
+Without the last option, the FORM database defaults to that same directory.
+The corresponding index Python keyword is \code{form_cache_database_path=}.

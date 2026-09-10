@@ -42,13 +42,13 @@ superconformal index of a Lagrangian four-dimensional $\mathcal N=2$ gauge theor
 FORM performs exact truncated series algebra. LiE decomposes individual Adams
 operations and intermediate products. Python pairs dual irreps to extract the
 final singlet, independently for every simple gauge factor. SQLite stores exact
-decompositions and final singlet coefficients. Sage supplies input/representation
+parsed FORM expansions, decompositions and final singlet coefficients. Sage supplies input/representation
 data, the dual-label convention and the exact returned polynomial ring.
 
-This revision updates the cache, projection algorithm, helper descriptions and
-validation. The unrevised index convention, matter characters, FORM expansion,
-JSON examples and interpretation are retained. Earlier validation is dated
-explicitly. The companion implementation reference provides package-wide context.
+This revision describes commit \code{04bbe21}: FORM expansion caching, reuse of
+cached character factors, and a complete Adams-cache builder with a process pool.
+It gives exact cutoff bounds, APIs and measured comparisons. The index convention
+and single-letter equations are retained. Earlier validation is dated explicitly. The companion implementation reference provides package-wide context.
 
 \section*{Contents}
 \begin{tabularx}{\textwidth}{@{}Yr@{}}
@@ -59,7 +59,7 @@ explicitly. The companion implementation reference provides package-wide context
 5 How FORM represents and expands the index & 3\\
 6 Adams operations and LiE decomposition & \pageref{sec:adams}\\
 7 Gauge-singlet projection for product groups & \pageref{sec:projection}\\
-8 The SQLite character and singlet cache & \pageref{sec:cache}\\
+8 SQLite caches and complete Adams-cache builder & \pageref{sec:cache}\\
 9 Python functions and their mathematical roles & \pageref{sec:functions}\\
 10 JSON examples and command-line use & \pageref{sec:json}\\
 11 Validation and representative performance & \pageref{sec:validation}\\
@@ -219,7 +219,7 @@ $[\mathbf1](\psi^2\mathbf2)=-1$, while
 $[\mathbf1]((\psi^2\mathbf2)^2)=(-1)^2+1^2=2$.
 
 \clearpage
-\section{The SQLite character and singlet cache}\label{sec:cache}
+\section{SQLite caches and complete Adams-cache builder}\label{sec:cache}
 For the exponent vector in Eq.~(21), define its total Adams order
 \begin{equation}
  q(\mathbf n)=\sum_{j\geq1}j n_j.
@@ -271,7 +271,9 @@ thread-local entries \cite{python-sqlite}.
 
 Legacy JSON file discovery/import and \code{cache_path()} are removed. The new
 projection preserves existing SQLite keys and schema; no migration is needed.
-FORM still performs the fugacity expansion on every run.
+FORM expansion now has its own raw-program cache, described next.
+\newcommand{\cacheheading}{\subsection}
+\input{cache_session_algorithms.tex}
 
 \clearpage
 \section{Python functions and their mathematical roles}\label{sec:functions}
@@ -285,10 +287,15 @@ records vector and matter character monomials.\\
 \code{_build_form_program} & Implements Eqs.~(7), (17), (14), and (20).\\
 \code{run_form} & Shared helper in \code{common/form_utils.py}; runs FORM in an
 isolated temporary directory and requires a successful, clean process result.\\
-\code{_parse_form_output} & Converts each exact FORM monomial to a \code{FormTerm};
-rational coefficients become Python \code{Fraction} objects.\\
+\code{FormExpansionCache.}\newline\code{get_expansion} & Retrieves parsed terms by raw program;
+executes, parses and stores a miss.\\
+\code{FormExpansionCache.}\newline\code{parse_form_output} & Converts exact FORM monomials to
+\code{IndexFormTerm} records with \code{Fraction} coefficients.\\
 \code{get_decomposition},\newline\code{get_decompositions} & Retrieve or construct
-Eq.~(21); batch missing prerequisites by tensor-factor count.\\
+Eq.~(21); prefer available cached factors and batch missing prerequisites by
+tensor-factor count.\\
+\code{build_decomposition_cache} & Enumerate all products at each weighted order;
+commit lower orders before parallel generation of the next.\\
 \code{get_singlet_multiplicities} & Look up symbolic-product singlets first;
 calculate missing integers with \code{_character_singlets}.\\
 \code{singlet_multiplicities} & Cache singlets from already-decomposed inputs;
@@ -342,18 +349,25 @@ With the Sage environment active and \code{form} and \code{lie} on \code{PATH}:
 \begin{lstlisting}[language=bash]
 python -m index.n2_theory_index theory.json --order 10
 \end{lstlisting}
-The default cache is \code{char_decomposition_cache.db} at the project root.
+The default files are \code{char_decomposition_cache.db} and
+\code{form_expansion_cache.db} at the project root.
 Use \code{--cache-database} \code{/path/to/cache.db} for an explicit file, or
 \code{--cache-directory} \code{/path/to/directory} for the default filename inside that
 directory. These options are mutually exclusive; the corresponding Python
-arguments are \code{database_path=} and \code{cache_directory=}.
+arguments are \code{database_path=} and \code{cache_directory=}. The FORM database
+follows the character database directory unless \code{--form-cache-database}
+(or Python \code{form_cache_database_path=}) overrides it.
 
 For example, an unlimited single-worker calculation through $t^{18}$ is
 \begin{lstlisting}[language=Python]
-result = calculate_index(data, 18, processes=1, timeout=None,
-                         database_path="/tmp/fresh_index_cache.db")
+result = calculate_index(
+    data, 18, processes=1, timeout=None,
+    database_path="/tmp/fresh-index/characters.db",
+    form_cache_database_path="/tmp/fresh-index/form.db",
+)
 \end{lstlisting}
-Use a previously nonexistent database for a cold-cache timing. \code{timeout=None}
+Use previously nonexistent files for both databases for a fully cold-cache
+timing. Filling only the character database leaves FORM cold, and vice versa. \code{timeout=None}
 is passed through to FORM and LiE; it removes their subprocess timeout.
 
 \clearpage
@@ -383,8 +397,8 @@ Representative product-group timings through $t^{10}$ were:
 $A_1\times A_1$ bifundamental & 1.030 s & 0.042 s\\
 $A_1\times G_2$ mixed matter & 0.274 s & 0.127 s\\\bottomrule
 \end{tabular}\end{center}
-Timings are machine-dependent. They illustrate that the persistent decomposition
-cache removes repeated LiE work but not FORM's per-run series expansion.
+These historical timings predate FORM caching: their warm runs remove repeated
+LiE work but still execute the FORM series expansion. They are machine-dependent.
 The complete project test run after that earlier replacement passed 55 tests;
 two live MySQL integration tests were skipped because no test database was requested.
 
@@ -394,7 +408,7 @@ The temporary projection candidate matched all seven comparative index cases and
 Of these, 202 also matched independent $SU(2)$/$SU(3)$ weight calculations.
 All 216 dual-label comparisons across 18 Cartan types matched Sage. All 4,996 old
 SQLite singlet entries tested were reused without recalculation. These checks
-preceded promotion to the implementation now committed as \code{0a402ec}.
+preceded promotion to \code{0a402ec}, before the later FORM/planner/builder changes.
 
 The full post-projection suite ran 170 tests in 11.461 s: 168 passed and two live
 MySQL tests were skipped. Seven new regressions cover signed complex/pseudoreal
@@ -403,7 +417,7 @@ generation, trivial factors and zeros. These are local validation results;
 they do not establish correctness at all ranks and cutoffs.
 
 \clearpage
-\subsection{Measured speedups and unlimited A32 profile}
+\subsection{Earlier speedups and A32 profile, before FORM caching}
 \begin{tabularx}{\textwidth}{@{}Yrr@{}}
 \toprule Cold calculation & Previous (s) & Revised (s)\\\midrule
 $A_8$, $t^{18}$, singlet projection & 4.599 & 0.849\\
@@ -437,6 +451,9 @@ Evidence and reproduction commands are in
 \code{output/benchmarks/a32_unlimited/report.md}. The unlimited run shows that the
 remaining cost is an intermediate full decomposition, not the final sparse pairing.
 
+\input{cache_session_validation.tex}
+
+\clearpage
 \section{Interpretation and limitations}\label{sec:limits}
 \begin{itemize}
 \item The result is a signed protected index, not a complete operator spectrum.

@@ -4,55 +4,53 @@ Last updated: **2026-09-10 (Asia/Seoul)**.
 
 ## Where this session stopped
 
-Simple- and product-group irrep and conformal matter enumeration are implemented.
-The new `enumerate_product_theory_candidates` accepts an iterable of Cartan
-strings and solves the coupled beta equations with `frobenius_system_solve`. Reality classification uses Tits' formula; all
-146 comparisons with Sage's Frobenius-Schur indicator matched across 23 Cartan
-types. A32 enumeration returns six candidates in about 1.1 seconds after
-algebra initialization.
+The current code is committed through `04bbe21`. This session added three
+changes to the FORM/LiE index pipeline:
 
-The user then supplied Claude's independent correctness audit. A read-only
-review reproduced its main findings, including the full/half-hyper database
-normalization gap and a missing factor of two in this handoff's beta-function
-formula. The handoff formula was corrected first. Earlier fixes standardize
-conjugate canonicalization on the lexicographically larger labels throughout
-enumeration, flavor metadata, and database hashing; correct the Coulomb-module
-docstring; and correct the reference PDF's central-charge payload table. The
-latest database fix pairs pseudoreal half hypers into full hypers for hashing,
-so equivalent full, half, and mixed descriptions deduplicate. Shared flavor
-data now stores half-hyper units without the submitted full/half split; raw
-realization records retain it. Schema version 6 removes the two redundant
-flavor-factor columns. After adding product theory enumeration, the SQLite character cache and sparse
-singlet projection, the full suite runs 170 tests: 168 passed and two live-MySQL
-tests were skipped. Existing realization hashes are not rehashed
-automatically; rows written with the previous full/half convention need a
-separate migration before relying on deduplication against new imports.
+1. `index/form_expansion_cache.py` serializes exact `IndexFormTerm` lists in
+   SQLite, keyed by the complete raw FORM program. Index calculations now reuse
+   those expansions, including across different groups when the programs match.
+2. The character cache reuses two existing lower-order decompositions when this
+   avoids missing intermediate products. First Adams and trivial-representation
+   identities bypass LiE. The temporary candidate was compared for exactness and
+   performance before promotion.
+3. `build_decomposition_cache` precomputes every same-irrep Adams product at
+   weighted orders 1 through a maximum. It uses `frobenius_solve`, a persistent
+   process pool, and a commit barrier between orders. The API and CLI support
+   resuming partially filled databases.
 
-The Coulomb-branch index, plethystic-log spectrum extraction, property
-integration, and schema version 6 are also implemented. **No HL/Higgs-branch
-calculator or flavor-refined index has been implemented.** The earlier HL/Higgs
-discussion is retained below as context, not an accepted implementation task.
+For an index through `t^N`, prebuilding through weighted Adams order
+`floor(N/2)` is sufficient for each required adjoint/matter irrep, including
+its distinct conjugate when used. For `t^18`, use order 9. This can overcompute:
+the singlet projector only needs a subset of all same-irrep products.
 
-The latest cleanup removes legacy JSON-cache import/discovery and the obsolete
-`cache_path()` wrapper. Use `cache.database_path` to locate the SQLite file.
-The latest optimization splits each character monomial into two parts before
-requesting decompositions, then obtains the singlet by pairing dual irreps.
-A temporary implementation matched the existing SQLite code and independent
-weight calculations before promotion. A8 SQCD through t^18 now takes 2.44 seconds
-for the full cold index, versus 6.21 seconds before; warm time stays about 1.70
-seconds. The unlimited A32 SQCD run through t^18 completed in 94.293 seconds
-cold and 1.786 seconds warm. The intermediate `psi_3(adjoint)^2` decomposition
-alone took 82.699 seconds (87.7% of the cold total); this is the main remaining
-bottleneck. Both revised PDFs now document the cache and projection algorithm,
-and both have retained LaTeX sources. Unrevised PDF content was preserved.
+With character decompositions and final singlet coefficients already filled,
+FORM hits sped up the nine measured full-index cases by 6.52-8.44 times at
+`t^18`; all 270 timed comparisons matched exactly. The cached-factor planner
+improved targeted misses but showed no consistent full-index speedup. Its
+operation-count savings must not be presented as a general end-to-end gain.
+The documentation-time verification ran **209 tests: 207 passed and two
+live-MySQL tests skipped**. The Tests section records the command and timing;
+the benchmark sections give conditions and retained evidence.
+
+Earlier work remains implemented: simple/product conformal matter enumeration,
+Tits reality classification, exact sparse singlet projection, Coulomb-branch
+PE/PL and spectrum extraction, and MySQL schema version 6 with full/half-hyper
+normalization. Old realization hashes are not automatically rehashed.
+**No SU power-sum backend, symbolic-multiplicity FORM template, HL/Higgs-branch
+calculator or flavor-refined index has been implemented.** The Mathematica and
+HL/Higgs discussions are context, not authorization for future code changes.
+
+Both existing PDFs and their retained LaTeX/build inputs are updated in this
+turn for the FORM cache, planner, complete builder, cutoff proof and measured
+validation. This turn changes documentation only.
 
 The user prefers exact arithmetic, FORM for symbolic expansions, reuse of
 existing helpers, and gauge information supplied through `GaugeFactorData`.
-Their standing conjugacy preference is to choose the fundamental over its
-antifundamental: use the lexicographically larger Dynkin labels whenever
-identifying conjugates, including simultaneous conjugation for product groups.
-Treat this document as session context; future work depends on the user's
-next request.
+Their conjugacy preference is the lexicographically larger Dynkin labels
+whenever identifying conjugates, including simultaneous conjugation for
+product groups. Actual character decompositions retain distinct orientations.
+Treat this document as context; future work depends on the user's next request.
 
 ## Project location and status
 
@@ -68,24 +66,12 @@ properties, superconformal/Coulomb-index calculation, Coulomb-generator
 dimensions, bounded irrep enumeration, simple- and product-group conformal matter
 enumeration, and MySQL persistence.
 
-HEAD is on `master` at commit `0a402ec`. The Frobenius-system solver, product
-theory enumerator, SQLite character cache, legacy-cache cleanup and sparse
-singlet projection are committed. Current changes update both index PDFs,
-preserve their LaTeX/build inputs and refresh this handoff. The unlimited A32
-profile is retained under `output/benchmarks/a32_unlimited/`. No commit,
-staging change, or remote fetch was performed for this update.
-Other untracked entries include:
-
-```text
-PROJECT_HANDOFF.md
-anomalies/__pycache__/
-common/__pycache__/
-index/__pycache__/
-test/__pycache__/
-```
-
-LiE cache locations are described below. Generated caches and bytecode should
-not be mistaken for source changes.
+HEAD is on `master` at `04bbe21` (complete decomposition-cache builder), after
+`a0165a2` (cached-factor planning) and `666a974` (FORM expansion cache).
+The current documentation update revises this handoff, both canonical PDFs,
+and their LaTeX/build inputs. No commit, staging change or remote fetch was
+performed for this update. Pre-existing staged/untracked `__pycache__` files
+were left alone. Generated SQLite caches and bytecode are not source changes.
 
 ## Runtime dependencies
 
@@ -95,7 +81,8 @@ The active implementation requires:
 - FORM, available as the `form` executable.
 - LiE, available as the `lie` executable.
 - PyMySQL and a MySQL server for database operations.
-- OR-Tools (`ortools`) for `common/math_utils.py` and the theory enumerator.
+- OR-Tools (`ortools`) for `common/math_utils.py`, the theory enumerator and
+  `build_decomposition_cache`. The builder imports the solver lazily.
   `cp_model` is imported at module scope, so importing `common/n2_theory_iter`
   requires OR-Tools even before calling the solver. It is not required by the
   standalone anomaly/index APIs. The configured Sage environment has OR-Tools
@@ -466,12 +453,14 @@ Files:
 
 - `index/n2_theory_index.py`
 - `index/char_decomposition_cache.py`
+- `index/form_expansion_cache.py`
 
 The original Mathematica and pure-Sage implementations were removed. The
 current implementation supports both simple and product gauge groups and uses:
 
 - FORM to expand and collect the truncated representation-valued plethystic
-  exponential.
+  exponential on a raw-program cache miss; SQLite reuses the parsed expansion
+  on a hit.
 - LiE to perform Adams operations and intermediate tensor-product decompositions.
 - Exact sparse pairing of dual irreps to extract the final gauge singlet.
 - A process pool to generate independent cold-cache decompositions in
@@ -484,6 +473,108 @@ Flavor fugacities are effectively set to 1: matter copies enter as integer
 multiplicities in `_matter_character_multiplicities`. This preserves total
 counts but omits flavor representation information. The separate flavor-group
 metadata in the property calculator does not make the index flavor-refined.
+
+### FORM expansion cache
+
+`FormExpansionCache` in `index/form_expansion_cache.py` owns the moved parser
+and `IndexFormTerm` record. The frozen record has `coefficient: Fraction`,
+integer `t_power`, `y_power`, `u_power`, and
+`characters: tuple[(character_index, AdamsPowers), ...]`.
+`_encode_expansion` serializes a list of rows:
+
+```text
+["numerator", "denominator", t_power, y_power, u_power,
+ [[character_index, [n1, n2, ...]], ...]]
+```
+
+`_decode_expansion` reconstructs arbitrary-size exact fractions and nested
+tuples. `FormExpansionCache.parse_form_output` replaces the old parser in
+`n2_theory_index.py`; the current term class is `IndexFormTerm`, not `FormTerm`.
+
+```sql
+CREATE TABLE form_expansions (
+    program TEXT COLLATE BINARY NOT NULL PRIMARY KEY,
+    expansion_json TEXT NOT NULL
+) WITHOUT ROWID;
+```
+
+The full raw FORM program string is the primary key, not a digest. Whitespace,
+numeric multiplicities, character numbering and order all affect equality.
+There is no canonical program normalization or symbolic-multiplicity template.
+`get_expansion(program)` selects and decodes a hit. On a miss it runs FORM,
+parses the output, encodes it, and inserts with `ON CONFLICT DO NOTHING`.
+Execution/parse failures are not cached. Values contain formal characters
+before gauge projection; Cartan types and Dynkin labels are supplied by each
+calculation's character basis afterward.
+
+Connections are local to each thread, with PID checks to avoid reusing an
+inherited connection. WAL, a 30-second busy timeout and three-attempt busy/locked
+retries support concurrent clients. FORM runs outside write transactions.
+Concurrent identical misses may execute more than once, but store one complete
+row. This is safe concurrent persistence, not a single-execution guarantee.
+The context manager closes the current thread's connection.
+
+The default is project-root `form_expansion_cache.db`, from
+`DEFAULT_FORM_CACHE_DATABASE`. Unlike the character module, this module does
+not set `user_version`. `calculate_index` and `calculate_index_internal` accept
+`form_cache_database_path=`; the CLI accepts `--form-cache-database`. By default
+this database follows the actual character database directory. Thus
+`--cache-directory /path` places both default files there, and an explicit
+`--cache-database /path/characters.db` puts the default FORM file beside it.
+A FORM hit avoids execution and parsing but still performs singlet projection
+and polynomial construction. Orders below two return the vacuum without
+external execution or cache access.
+
+### FORM cache measurements and cross-theory reuse
+
+The retained I/O benchmark used 113,831 terms from a `t^18` expansion: 589 bytes
+of program text and 5,907,568 bytes of JSON (5.91 MB). Thirty measured trials
+followed three warmups, with SQLite WAL/synchronous FULL on the project
+filesystem. Median save time was 221.51 ms (179.32 ms serialization and
+42.07 ms insert/commit, with component medians measured separately). Initial
+DB setup was another 31.43 ms. SQL read took 3.08 ms; decoding took 866.42 ms.
+A hit cost 870.81 ms with an open connection or 894.65 ms with a new client
+including close. Python object reconstruction dominated. This excludes FORM
+execution/parsing and measures warm filesystem caches, one process and no
+writer contention. Evidence and reproduction script:
+`output/benchmarks/form_expansion_cache_io/{report.md,timings.json,benchmark.py}`.
+
+Full-index benchmarks used nine SCFTs, `t^12` and `t^18`, one warmup and five
+measured repetitions per mode. Both decompositions and final singlet
+coefficients were prefilled; query-only character databases and no-LiE guards
+verified this. Each timed calculation opened fresh clients. All 270 timed
+indices matched exactly. Median full times at `t^18`, in seconds:
+
+| Theory (full hypers) | FORM cache disabled | Miss + save | Hit | Disabled / hit |
+|---|---:|---:|---:|---:|
+| SU(2), 4 fundamentals | 0.4323 | 0.4916 | 0.0617 | 7.00x |
+| SU(3), 6 fundamentals | 1.7220 | 1.7959 | 0.2304 | 7.48x |
+| SU(5), 10 fundamentals | 1.7265 | 1.7839 | 0.2648 | 6.52x |
+| SU(3), 1 adjoint (N=4) | 0.2808 | 0.3180 | 0.0429 | 6.54x |
+| Sp(2)=USp(4), 6 fundamentals | 0.4434 | 0.4817 | 0.0634 | 7.00x |
+| Spin(8), 6 vectors | 0.4329 | 0.4848 | 0.0655 | 6.60x |
+| G2, 4 fundamentals | 0.4418 | 0.4874 | 0.0640 | 6.90x |
+| SU(2)xSU(2), 2 bifundamentals | 2.7421 | 2.7843 | 0.3251 | 8.44x |
+| SU(5), symmetric + antisymmetric | 13.7565 | 14.1896 | 1.8771 | 7.33x |
+
+Here "disabled" bypasses FORM SQLite but still executes/parses FORM; it is
+benchmark instrumentation, not a public CLI mode. Miss mode uses an initialized
+empty FORM DB and includes encode/write time. Hit mode forbids FORM execution.
+Setup, prefilling and Python/Sage startup are excluded. Runs use one worker,
+warm OS file caches and no competing benchmark workers. The `t^12` speedup
+range was 3.23-6.92x. Reports, scripts and raw samples are in
+`output/benchmarks/form_expansion_theories/`.
+
+That directory also retains `check_cross_theory_reuse.py`,
+`cross_theory_reuse.json` and `cross_theory_reuse.md`. SU(2) with four
+fundamentals shares a raw program with G2 with four fundamentals; Sp(2) with
+six fundamentals shares one with Spin(8) with six vectors. Both directions at
+`t^12` and `t^18` gave eight passing checks. After the first theory populated
+one row, a new second-theory client executed/parsed FORM zero times, decoded
+once and retained one row. Each final index matched its own fresh-FORM result,
+while paired final indices differed. A changed-program control missed.
+Cross-theory reuse requires identical raw text and a shared FORM database;
+matching expansion structure alone is not sufficient.
 
 ### Character decomposition cache
 
@@ -531,8 +622,9 @@ incur 30–50 ms of setup overhead. All 2,343 persisted decomposition comparison
 and all seven benchmark index cases matched. Details and raw timings are in
 `output/benchmarks/sqlite_cache_benchmark.md` and `sqlite_cache_timings.json`;
 `test/benchmark_character_cache.py` reproduces comparisons with baseline git
-revision `d4d103a`. After removing the obsolete legacy-import test, the full suite runs 163 tests,
-with two live-MySQL skips.
+revision `d4d103a`. The historical suite at that point ran 163 tests,
+with two live-MySQL skips. These measurements predate FORM expansion caching;
+character-warm runs still executed FORM.
 
 ### Singlet projection without decomposing the complete product
 
@@ -570,7 +662,7 @@ improved 6.21 -> 2.44 seconds; warm performance stayed about 1.70 seconds.
 Details are in `output/benchmarks/singlet_projection_benchmark.md` and
 `singlet_projection_timings.json`. The reusable benchmark accepts
 `--baseline-ref a9b7009 --baseline-label existing --candidate-label sparse`.
-After promotion, the complete suite ran 170 tests in 11.461 seconds, with 168
+At that earlier projection revision, the complete suite ran 170 tests in 11.461 seconds, with 168
 passed and two live-MySQL skips. The seven new tests in
 `test/test_singlet_projection.py` cover signed complex/pseudoreal pairings,
 large integers, grouped Adams splitting, mixed products, independent SU(2)/SU(3)
@@ -579,7 +671,8 @@ weights, serial/parallel generation, trivial characters and zeros.
 The split is a heuristic and does not eliminate all intermediate decomposition
 costs. A16 t^18 projection finished in 1.92 seconds while the previous code
 exceeded 25 seconds; no full old/new comparison was possible for that case.
-The earlier A32 t^18 probe exceeded its 25-second limit; the unlimited follow-up
+All timings in this projection subsection predate FORM caching. The earlier
+A32 t^18 probe exceeded its 25-second limit; the unlimited follow-up
 on 10 September completed. It used SU(33) SQCD with 66 full fundamental hypers,
 `processes=1`, `timeout=None`, and a fresh temporary SQLite file. Complete times
 were 94.293 seconds cold and 1.786 seconds warm, with 117 exactly matching
@@ -592,6 +685,109 @@ one worker, not medians or default-process-count timings. See
 `output/benchmarks/a32_unlimited/report.md`, `summary.json`, `events.jsonl` and
 `results.json`; the exact index and profiling script are retained there too.
 No production code was changed for profiling.
+
+### Selecting already cached character factors
+
+For a base irrep R, write `D_R(n) = product_j psi_j(R)^n_j`. If `a+b=n`
+componentwise, `D_R(n) = D_R(a) tensor D_R(b)`. The current instance method
+`_decomposition_dependencies(algebra, labels, powers)` keeps the usual
+peel-one-factor split when both dependencies are already available, and for
+products with at most two factors. Otherwise it queries lower-weighted-order
+keys for that same algebra/irrep, includes thread-local entries and the known
+`psi_1(R)=R`, and finds complementary cached pairs.
+
+Available pairs are scored by the product of their numbers of irrep terms;
+zero/scalar factors have zero estimated cost. Ties use total support size then
+vectors. This is a heuristic, not a guarantee of the fastest LiE tensor call.
+The batch dependency scheduler and actual calculation use the same choice.
+The existing tensor helper handles signed coefficients, zeros and scalar
+shortcuts. First Adams and all trivial-representation products return directly.
+There is no schema/key migration or change in thread/process ownership.
+
+The temporary candidate was tested before promotion. Five-trial targeted
+persisted-cache misses improved 1.31-1.72x for the single-request API and
+1.03-1.17x for the batch API. Each reduced two tensor calls to one; a
+composite-only cache case also reduced one Adams call to zero. All 130
+comparison products across A1, A2 fundamental/adjoint, C2 and G2 matched in
+serial and three-worker runs; SU(2) also matched independent weights.
+
+All 72 full-index comparisons at `t^18` matched across six theories and two
+character-cache states (cold and filled through `t^12`), with FORM prefilled
+for both implementations. They showed **no consistent overall speedup**;
+tensor-call counts were identical. This change helps particular missing
+products; it does not remove the expensive intermediate LiE tensor bottleneck.
+Retained baseline/candidate files, report, raw timings and reproduction script:
+`output/benchmarks/adams_cache_planner/`.
+
+### Complete decomposition-cache builder and cutoff
+
+```python
+build_decomposition_cache(
+    cartan_type, dynkin_labels, max_adams_order, *,
+    cache_directory=None, database_path=None, processes=None,
+    lie_executable="lie", timeout=600, progress=None,
+) -> dict[int, int]
+```
+
+At each weighted order q, the builder enumerates all nonnegative integer
+vectors `(n1,...,nq)` with `sum(j*n_j)=q` by calling
+`common.math_utils.frobenius_solve(range(1, q+1), q)`. These are the integer
+partitions in multiplicity notation; orders 1-6 have 1,2,3,5,7,11 solutions,
+29 total. It writes one decomposition for every solution of the chosen irrep
+into the existing character table. It does not fill singlet coefficients,
+mixed-irrep partial products or the FORM cache.
+
+Existing rows are skipped using keys alone, without decoding their payloads.
+Missing solutions at an order are split among a lazily created persistent
+`ProcessPoolExecutor` using `spawn`. Batches contain at most 64 requests,
+with several batches per worker for load balance. Workers read lower-order
+dependencies and calculate; the parent commits each completed batch. It
+submits the next order only after all batches at the current order are saved.
+Completed batches survive later errors/stops and are reused on rerun.
+Concurrent independent builds can duplicate misses but preserve complete rows.
+
+Every composite has two strictly lower-order factors, already cached at this
+barrier. It therefore needs at most one tensor operation, with the usual
+zero/scalar shortcuts. For a nontrivial irrep and an initially empty DB, one
+uninterrupted build makes one logical Adams calculation at each j=2,...,M,
+M-1 total. First Adams is known directly. This count excludes backend retries
+and duplicate work by simultaneous independent builds.
+
+The function returns `{order: total_product_count}`, including reused rows.
+`progress(order, total, computed)` runs in the parent after each order is
+committed. `processes=1` is serial; default is CPU count. Use a `__main__`
+guard in multiprocess scripts. Maximum order and process count are positive
+integers. Cache path options follow `CharacterDecompositionCache`; `timeout`
+is per LiE invocation, with Python `None` meaning no subprocess timeout.
+OR-Tools is imported lazily through `frobenius_solve` when building.
+
+```bash
+sage -python -m index.char_decomposition_cache A2 \
+  --dynkin-labels 1 0 --max-adams-order 9 --processes 4 \
+  --cache-database /tmp/index-demo/char_decomposition_cache.db
+```
+
+The direct script form also works. `--max-order` aliases `--max-adams-order`;
+other flags include `--cache-directory`, `--lie-executable` and numeric
+`--timeout`. The CLI reports computed/reused counts by order, then the total
+and DB path. Reported failures exit with status 2. A warm rerun enumerates and
+checks keys, but performs no LiE work and starts no worker pool.
+
+For an index through `t^N`, letters start at `t^2`, so an Adams factor j costs
+at least `t^(2j)`. A same-irrep product of weighted order q therefore has
+`t` degree at least 2q, giving **q <= floor(N/2)**. Use that maximum separately
+for every required adjoint and matter irrep, including distinct conjugates.
+For A2 SQCD at `t^18`, prebuild labels `(1,0)`, `(0,1)` and `(1,1)` through
+order 9. Product groups obey the bound per factor/irrep, not after summing
+duplicated character orders across bifundamental gauge factors. At N<2 no
+prebuild is needed. Exhaustive prebuilding is optional and can be substantially
+more expensive than filling only the projector's requests.
+
+Twelve builder regressions test completeness against independent SU(2) weights,
+A1/A2/C2/G2 serial/parallel equality, pool reuse, warm skips, resume/failure
+persistence and both CLI entry points. Real worker logs through order six
+show Adams(2),...,Adams(6) exactly once each and 23 tensor calls across multiple
+worker PIDs. No broad wall-time speedup for exhaustive prebuilding is claimed.
 
 ### Sage result ring and serialization
 
@@ -630,7 +826,8 @@ CLI example:
 sage -python index/n2_theory_index.py \
   anomalies/example_a1.json \
   --order 18 \
-  --cache-database char_decomposition_cache.db
+  --cache-database char_decomposition_cache.db \
+  --form-cache-database form_expansion_cache.db
 ```
 
 ## Coulomb-branch implementation
@@ -862,50 +1059,38 @@ sage -python common/n2_theory_db.py \
 
 ## Tests
 
-Test files:
+The suite includes anomaly, property, index, Coulomb, database, enumeration,
+Lie-algebra and math-utility tests, plus dedicated modules:
 
-- `test/test_check_n2_anomalies.py`
-- `test/test_n2_theory_properties.py`
-- `test/test_n2_theory_index.py`
-- `test/test_n2_theory_coulomb_branches.py`
-- `test/test_n2_theory_db.py`
-- `test/test_n2_theory_iter.py`
-- `test/test_lie_algebra.py`
-- `test/test_math_utils.py`
+- `test/test_character_decomposition_cache.py`
+- `test/test_singlet_projection.py`
+- `test/test_form_expansion_cache.py` (20 FORM-cache regressions)
+- `test/test_cached_decomposition_planning.py` (7 planner regressions)
+- `test/test_build_decomposition_cache.py` (12 builder regressions)
 
-Run all tests with:
-
-```bash
-sage -python -m unittest discover -s test -p 'test_*.py' -v
-```
-
-The latest full-suite run, on 2026-09-09 after adding product theory enumeration, used the
-actual Sage, FORM, and LiE backends and reported:
+The documentation-time verification on 2026-09-10 used actual Sage, FORM and
+LiE and reported:
 
 ```text
-Ran 150 tests in 9.733s
+Ran 209 tests in 19.658s
 OK (skipped=2)
 ```
 
-That means **148 passed and 2 skipped**. The two skipped tests require live
-MySQL; schema migration and inserts were covered by recording/mock tests, not
-a live database run. The exact invocation disabled live database tests:
+That means **207 passed and 2 skipped**. The two skips require live MySQL;
+schema migration and inserts use recording/mock tests without a configured
+test server. Run the same suite without generating bytecode or contacting a
+live MySQL test database:
 
 ```bash
 N2_TEST_MYSQL_DATABASE= DOT_SAGE=/tmp/codex-sage-cache \
+  PYTHONDONTWRITEBYTECODE=1 \
   /home/subo-lee/miniconda3/envs/sage/bin/sage -python -B \
-  -m unittest discover -s test -p 'test_*.py' -v
+  -m unittest discover -s test -p 'test_*.py'
 ```
 
-The 96-test result in the previous handoff and reference PDF was an older,
-dated snapshot. Claude's 116-test snapshot predates the four Tits/A32 tests.
-The read-only audit review ran 120 tests; four subsequent canonicalization
-regressions brought the count to 124. Ten full/half database regressions brought
-the count to 134, including one test using actual FORM/LiE index calculations.
-Nine Frobenius-system tests and seven product-theory tests brought the count
-up to 150. These include exhaustive comparisons for 60 seeded small integer
-systems and mixed products A1 x A2, A1 x C2, and C2 x G2, plus SU(2)^3 odd
-trifundamental counts and SU(3)^2 conjugate orientations.
+Older 150-, 170-, 190- and 197-test snapshots precede later additions and must
+not be reported as current totals. Benchmark reports retain their original
+validation counts as historical evidence.
 
 Coverage includes irrep bounds and conjugates, product spectator factors,
 simple-theory enumeration against an exhaustive rational reference, and all
@@ -940,6 +1125,8 @@ The test database name must contain `test`.
 - `output/pdf/n2_implementation_reference_summary.pdf`
 - `output/pdf/n2_implementation_reference_summary.tex`
 - `output/pdf/n2_theory_index_Mathematical_Background.tex`
+- `output/pdf/cache_session_algorithms.tex`
+- `output/pdf/cache_session_validation.tex`
 - `output/pdf/source_assets/n2_background_preserved_pages_2_to_4.pdf`
 - `output/pdf/BUILD.md`
 
@@ -953,28 +1140,29 @@ relationships, primary/unique keys, shared versus realization ownership,
 full/half normalization, and migration/backfill limitations. It also records the
 134-test validation result as a dated historical snapshot.
 
-The 10 September update revises section 3.3 of the implementation reference and
-sections 6-11 plus relevant architecture/API wording of the index-background
-PDF. They explain Schur orthogonality, `Hom_G(V*,W)`, dual highest weights,
-signed/pseudoreal pairings, the splitter and helper functions, the SQLite
-schema and concurrency, cache compatibility, the 170-test snapshot, measured
-speedups and the unlimited A32 bottleneck. New citations include Etingof's MIT
-notes (Proposition 32.1 and Corollary 35.9), official Sage dual/inner-product
-documentation, SQLite WAL/datatypes and Python sqlite3 documentation. The
-project-specific splitting heuristic and timings are identified as such.
-Unrelated anomaly, Coulomb, Higgs-design and MySQL content remains unchanged.
+The latest 10 September update documents the committed FORM expansion cache,
+exact raw-program keys and serialization, concurrent access, cross-theory hits,
+weighted-order cached-factor planning, the complete builder API/CLI, order
+barriers, resume semantics and the `floor(N/2)` cutoff proof. Controlled FORM
+benchmarks, the planner's limited full-index gains, builder operation-count
+checks and the 209-test snapshot are included in both PDFs. Older sparse
+projection and A32 timings are explicitly labeled as predating FORM caching.
 
-The mathematical-background source is retained at the user's explicit request.
-It embeds the preserved original pages 2-4 through the `source_assets` PDF;
-only the obsolete JSON-cache sentence on original page 2 was changed. Keep
-that asset with the TeX file when moving or rebuilding the document. Remaining
-pages are editable LaTeX. `output/pdf/BUILD.md` records the two-pass build commands
-and copies the background PDF to its canonical `index/` location. PDF outputs
-are 28 and 13 pages respectively, and were rendered and visually checked, with no
-overfull boxes or unresolved
-citations. Nineteen unchanged summary pages were compared for identical body
-text and equation numbering; background pages 3-4 were preserved completely.
-No production code or live database was changed for this documentation update.
+The two new shared LaTeX inputs keep these descriptions and measured tables
+consistent between the standalone PDFs. The index guide also embeds original
+pages 2-4 through `source_assets/n2_background_preserved_pages_2_to_4.pdf`;
+that existing asset is unchanged in this turn. Keep it and both shared inputs
+with the TeX sources. New equations use unnumbered displays so existing
+mathematical equation numbers remain stable. Unrelated anomaly, Coulomb,
+Higgs-design and MySQL sections retain their explicitly dated content.
+
+`output/pdf/BUILD.md` records reproducible build and visual-review commands.
+Both canonical outputs were rebuilt and visually checked: 34 pages for the
+implementation reference and 20 for the index guide. Final logs have no
+unresolved citations/references or overfull boxes. Original numbered equations
+remain unchanged; 23 original reference pages retain identical body text, and
+index-guide pages 2-4 retain identical text from the preserved asset. No application source, production cache, live
+MySQL database, git staging or existing bytecode is intentionally modified.
 
 Claude's supplied audit used a different sandbox and a Sage replacement for
 LiE. The current review reproduced its substantive findings, the FORM wildcard
@@ -1170,6 +1358,9 @@ Temporary copies of the first paper were downloaded as
 - Update the remaining implementation reference chapters for Tits reality,
   representation/theory enumeration and current dependencies; the database
   structure, schema-6 behavior and the current index/cache algorithm are documented.
+- Reduce Python object reconstruction cost for large cached FORM expansions
+  if later profiling justifies a format change; current exact JSON loading can
+  dominate warm runs. Preserve raw-program equality and concurrent writes.
 - Optimize the expensive intermediate `psi_3(adjoint)^2` tensor decomposition
   identified in the unlimited A32 profile; final sparse pairing is inexpensive.
 - Migrate existing database hashes and shared flavor labels if data stored
