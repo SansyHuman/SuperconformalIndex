@@ -1,0 +1,366 @@
+{
+  "completed_utc": "2026-09-10T07:41:19.488441+00:00",
+  "successful_cross_theory_checks": 8,
+  "checks": [
+    {
+      "source": "SU(2), 4 fundamental hypers",
+      "target": "G2, 4 fundamental hypers",
+      "order": 12,
+      "source_input": {
+        "algebra": "A1",
+        "hypermultiplets": [
+          {
+            "representation": "fundamental",
+            "number": 4,
+            "kind": "full"
+          }
+        ]
+      },
+      "target_input": {
+        "algebra": "G2",
+        "hypermultiplets": [
+          {
+            "representation": "fundamental",
+            "number": 4,
+            "kind": "full"
+          }
+        ]
+      },
+      "program": "#: MaxTermSize 600000\nOff statistics;\nS m,n,y,idx1,idx2,j,z,u,t(:12);\nCF d,C0,C1;\nPolyRatFun d;\nFunction Kvec,Khyp;\n\nL J=sum_(idx1,0,4,m^idx1)\n   *sum_(idx2,0,4,n^idx2);\nid m=t^3*y;\nid n=t^3/y;\n.sort\n\nL itotal=sum_(j,1,6,(Kvec(t^j,y^j,u^j)*C0(j)+8*Khyp(t^j,y^j,u^j)*C1(j))/j);\nid Kvec(t?,y?,u?)=J*(t^2*u^2-t^4/u^2-t^3*y-t^3/y+2*t^6);\nid Khyp(t?,y?,u?)=J*(t^2/u-t^4*u);\n.sort\n\nL I=z;\nid z=z*itotal;\n#do i=2,6\n  id z=1+z*itotal/`i';\n  .sort:step `i';\n#enddo\n.sort\n\nL result=1+I;\nid z=1;\n.sort\nPrint result;\n.end\n",
+      "source_form_calls": 1,
+      "target_form_calls": 0,
+      "target_parse_calls": 0,
+      "target_decode_calls": 1,
+      "rows_after_source": 1,
+      "rows_after_target": 1,
+      "independent_target_form_calls": 1,
+      "target_matches_independent": true,
+      "final_indices_differ": true,
+      "different_program_missed": true,
+      "example_difference": {
+        "powers": [
+          4,
+          0,
+          -2
+        ],
+        "source": "28",
+        "target": "36"
+      }
+    },
+    {
+      "source": "G2, 4 fundamental hypers",
+      "target": "SU(2), 4 fundamental hypers",
+      "order": 12,
+      "source_input": {
+        "algebra": "G2",
+        "hypermultiplets": [
+          {
+            "representation": "fundamental",
+            "number": 4,
+            "kind": "full"
+          }
+        ]
+      },
+      "target_input": {
+        "algebra": "A1",
+        "hypermultiplets": [
+          {
+            "representation": "fundamental",
+            "number": 4,
+            "kind": "full"
+          }
+        ]
+      },
+      "program": "#: MaxTermSize 600000\nOff statistics;\nS m,n,y,idx1,idx2,j,z,u,t(:12);\nCF d,C0,C1;\nPolyRatFun d;\nFunction Kvec,Khyp;\n\nL J=sum_(idx1,0,4,m^idx1)\n   *sum_(idx2,0,4,n^idx2);\nid m=t^3*y;\nid n=t^3/y;\n.sort\n\nL itotal=sum_(j,1,6,(Kvec(t^j,y^j,u^j)*C0(j)+8*Khyp(t^j,y^j,u^j)*C1(j))/j);\nid Kvec(t?,y?,u?)=J*(t^2*u^2-t^4/u^2-t^3*y-t^3/y+2*t^6);\nid Khyp(t?,y?,u?)=J*(t^2/u-t^4*u);\n.sort\n\nL I=z;\nid z=z*itotal;\n#do i=2,6\n  id z=1+z*itotal/`i';\n  .sort:step `i';\n#enddo\n.sort\n\nL result=1+I;\nid z=1;\n.sort\nPrint result;\n.end\n",
+      "source_form_calls": 1,
+      "target_form_calls": 0,
+      "target_parse_calls": 0,
+      "target_decode_calls": 1,
+      "rows_after_source": 1,
+      "rows_after_target": 1,
+      "independent_target_form_calls": 1,
+      "target_matches_independent": true,
+      "final_indices_differ": true,
+      "different_program_missed": true,
+      "example_difference": {
+        "powers": [
+          4,
+          0,
+          -2
+        ],
+        "source": "36",
+        "target": "28"
+      }
+    },
+    {
+      "source": "SU(2), 4 fundamental hypers",
+      "target": "G2, 4 fundamental hypers",
+      "order": 18,
+      "source_input": {
+        "algebra": "A1",
+        "hypermultiplets": [
+          {
+            "representation": "fundamental",
+            "number": 4,
+            "kind": "full"
+          }
+        ]
+      },
+      "target_input": {
+        "algebra": "G2",
+        "hypermultiplets": [
+          {
+            "representation": "fundamental",
+            "number": 4,
+            "kind": "full"
+          }
+        ]
+      },
+      "program": "#: MaxTermSize 600000\nOff statistics;\nS m,n,y,idx1,idx2,j,z,u,t(:18);\nCF d,C0,C1;\nPolyRatFun d;\nFunction Kvec,Khyp;\n\nL J=sum_(idx1,0,6,m^idx1)\n   *sum_(idx2,0,6,n^idx2);\nid m=t^3*y;\nid n=t^3/y;\n.sort\n\nL itotal=sum_(j,1,9,(Kvec(t^j,y^j,u^j)*C0(j)+8*Khyp(t^j,y^j,u^j)*C1(j))/j);\nid Kvec(t?,y?,u?)=J*(t^2*u^2-t^4/u^2-t^3*y-t^3/y+2*t^6);\nid Khyp(t?,y?,u?)=J*(t^2/u-t^4*u);\n.sort\n\nL I=z;\nid z=z*itotal;\n#do i=2,9\n  id z=1+z*itotal/`i';\n  .sort:step `i';\n#enddo\n.sort\n\nL result=1+I;\nid z=1;\n.sort\nPrint result;\n.end\n",
+      "source_form_calls": 1,
+      "target_form_calls": 0,
+      "target_parse_calls": 0,
+      "target_decode_calls": 1,
+      "rows_after_source": 1,
+      "rows_after_target": 1,
+      "independent_target_form_calls": 1,
+      "target_matches_independent": true,
+      "final_indices_differ": true,
+      "different_program_missed": true,
+      "example_difference": {
+        "powers": [
+          4,
+          0,
+          -2
+        ],
+        "source": "28",
+        "target": "36"
+      }
+    },
+    {
+      "source": "G2, 4 fundamental hypers",
+      "target": "SU(2), 4 fundamental hypers",
+      "order": 18,
+      "source_input": {
+        "algebra": "G2",
+        "hypermultiplets": [
+          {
+            "representation": "fundamental",
+            "number": 4,
+            "kind": "full"
+          }
+        ]
+      },
+      "target_input": {
+        "algebra": "A1",
+        "hypermultiplets": [
+          {
+            "representation": "fundamental",
+            "number": 4,
+            "kind": "full"
+          }
+        ]
+      },
+      "program": "#: MaxTermSize 600000\nOff statistics;\nS m,n,y,idx1,idx2,j,z,u,t(:18);\nCF d,C0,C1;\nPolyRatFun d;\nFunction Kvec,Khyp;\n\nL J=sum_(idx1,0,6,m^idx1)\n   *sum_(idx2,0,6,n^idx2);\nid m=t^3*y;\nid n=t^3/y;\n.sort\n\nL itotal=sum_(j,1,9,(Kvec(t^j,y^j,u^j)*C0(j)+8*Khyp(t^j,y^j,u^j)*C1(j))/j);\nid Kvec(t?,y?,u?)=J*(t^2*u^2-t^4/u^2-t^3*y-t^3/y+2*t^6);\nid Khyp(t?,y?,u?)=J*(t^2/u-t^4*u);\n.sort\n\nL I=z;\nid z=z*itotal;\n#do i=2,9\n  id z=1+z*itotal/`i';\n  .sort:step `i';\n#enddo\n.sort\n\nL result=1+I;\nid z=1;\n.sort\nPrint result;\n.end\n",
+      "source_form_calls": 1,
+      "target_form_calls": 0,
+      "target_parse_calls": 0,
+      "target_decode_calls": 1,
+      "rows_after_source": 1,
+      "rows_after_target": 1,
+      "independent_target_form_calls": 1,
+      "target_matches_independent": true,
+      "final_indices_differ": true,
+      "different_program_missed": true,
+      "example_difference": {
+        "powers": [
+          4,
+          0,
+          -2
+        ],
+        "source": "36",
+        "target": "28"
+      }
+    },
+    {
+      "source": "Sp(2) = USp(4), 6 fundamental hypers",
+      "target": "Spin(8), 6 vector hypers",
+      "order": 12,
+      "source_input": {
+        "algebra": "C2",
+        "hypermultiplets": [
+          {
+            "representation": "fundamental",
+            "number": 6,
+            "kind": "full"
+          }
+        ]
+      },
+      "target_input": {
+        "algebra": "D4",
+        "hypermultiplets": [
+          {
+            "representation": "vector",
+            "number": 6,
+            "kind": "full"
+          }
+        ]
+      },
+      "program": "#: MaxTermSize 600000\nOff statistics;\nS m,n,y,idx1,idx2,j,z,u,t(:12);\nCF d,C0,C1;\nPolyRatFun d;\nFunction Kvec,Khyp;\n\nL J=sum_(idx1,0,4,m^idx1)\n   *sum_(idx2,0,4,n^idx2);\nid m=t^3*y;\nid n=t^3/y;\n.sort\n\nL itotal=sum_(j,1,6,(Kvec(t^j,y^j,u^j)*C0(j)+12*Khyp(t^j,y^j,u^j)*C1(j))/j);\nid Kvec(t?,y?,u?)=J*(t^2*u^2-t^4/u^2-t^3*y-t^3/y+2*t^6);\nid Khyp(t?,y?,u?)=J*(t^2/u-t^4*u);\n.sort\n\nL I=z;\nid z=z*itotal;\n#do i=2,6\n  id z=1+z*itotal/`i';\n  .sort:step `i';\n#enddo\n.sort\n\nL result=1+I;\nid z=1;\n.sort\nPrint result;\n.end\n",
+      "source_form_calls": 1,
+      "target_form_calls": 0,
+      "target_parse_calls": 0,
+      "target_decode_calls": 1,
+      "rows_after_source": 1,
+      "rows_after_target": 1,
+      "independent_target_form_calls": 1,
+      "target_matches_independent": true,
+      "final_indices_differ": true,
+      "different_program_missed": true,
+      "example_difference": {
+        "powers": [
+          4,
+          0,
+          -2
+        ],
+        "source": "66",
+        "target": "78"
+      }
+    },
+    {
+      "source": "Spin(8), 6 vector hypers",
+      "target": "Sp(2) = USp(4), 6 fundamental hypers",
+      "order": 12,
+      "source_input": {
+        "algebra": "D4",
+        "hypermultiplets": [
+          {
+            "representation": "vector",
+            "number": 6,
+            "kind": "full"
+          }
+        ]
+      },
+      "target_input": {
+        "algebra": "C2",
+        "hypermultiplets": [
+          {
+            "representation": "fundamental",
+            "number": 6,
+            "kind": "full"
+          }
+        ]
+      },
+      "program": "#: MaxTermSize 600000\nOff statistics;\nS m,n,y,idx1,idx2,j,z,u,t(:12);\nCF d,C0,C1;\nPolyRatFun d;\nFunction Kvec,Khyp;\n\nL J=sum_(idx1,0,4,m^idx1)\n   *sum_(idx2,0,4,n^idx2);\nid m=t^3*y;\nid n=t^3/y;\n.sort\n\nL itotal=sum_(j,1,6,(Kvec(t^j,y^j,u^j)*C0(j)+12*Khyp(t^j,y^j,u^j)*C1(j))/j);\nid Kvec(t?,y?,u?)=J*(t^2*u^2-t^4/u^2-t^3*y-t^3/y+2*t^6);\nid Khyp(t?,y?,u?)=J*(t^2/u-t^4*u);\n.sort\n\nL I=z;\nid z=z*itotal;\n#do i=2,6\n  id z=1+z*itotal/`i';\n  .sort:step `i';\n#enddo\n.sort\n\nL result=1+I;\nid z=1;\n.sort\nPrint result;\n.end\n",
+      "source_form_calls": 1,
+      "target_form_calls": 0,
+      "target_parse_calls": 0,
+      "target_decode_calls": 1,
+      "rows_after_source": 1,
+      "rows_after_target": 1,
+      "independent_target_form_calls": 1,
+      "target_matches_independent": true,
+      "final_indices_differ": true,
+      "different_program_missed": true,
+      "example_difference": {
+        "powers": [
+          4,
+          0,
+          -2
+        ],
+        "source": "78",
+        "target": "66"
+      }
+    },
+    {
+      "source": "Sp(2) = USp(4), 6 fundamental hypers",
+      "target": "Spin(8), 6 vector hypers",
+      "order": 18,
+      "source_input": {
+        "algebra": "C2",
+        "hypermultiplets": [
+          {
+            "representation": "fundamental",
+            "number": 6,
+            "kind": "full"
+          }
+        ]
+      },
+      "target_input": {
+        "algebra": "D4",
+        "hypermultiplets": [
+          {
+            "representation": "vector",
+            "number": 6,
+            "kind": "full"
+          }
+        ]
+      },
+      "program": "#: MaxTermSize 600000\nOff statistics;\nS m,n,y,idx1,idx2,j,z,u,t(:18);\nCF d,C0,C1;\nPolyRatFun d;\nFunction Kvec,Khyp;\n\nL J=sum_(idx1,0,6,m^idx1)\n   *sum_(idx2,0,6,n^idx2);\nid m=t^3*y;\nid n=t^3/y;\n.sort\n\nL itotal=sum_(j,1,9,(Kvec(t^j,y^j,u^j)*C0(j)+12*Khyp(t^j,y^j,u^j)*C1(j))/j);\nid Kvec(t?,y?,u?)=J*(t^2*u^2-t^4/u^2-t^3*y-t^3/y+2*t^6);\nid Khyp(t?,y?,u?)=J*(t^2/u-t^4*u);\n.sort\n\nL I=z;\nid z=z*itotal;\n#do i=2,9\n  id z=1+z*itotal/`i';\n  .sort:step `i';\n#enddo\n.sort\n\nL result=1+I;\nid z=1;\n.sort\nPrint result;\n.end\n",
+      "source_form_calls": 1,
+      "target_form_calls": 0,
+      "target_parse_calls": 0,
+      "target_decode_calls": 1,
+      "rows_after_source": 1,
+      "rows_after_target": 1,
+      "independent_target_form_calls": 1,
+      "target_matches_independent": true,
+      "final_indices_differ": true,
+      "different_program_missed": true,
+      "example_difference": {
+        "powers": [
+          4,
+          0,
+          -2
+        ],
+        "source": "66",
+        "target": "78"
+      }
+    },
+    {
+      "source": "Spin(8), 6 vector hypers",
+      "target": "Sp(2) = USp(4), 6 fundamental hypers",
+      "order": 18,
+      "source_input": {
+        "algebra": "D4",
+        "hypermultiplets": [
+          {
+            "representation": "vector",
+            "number": 6,
+            "kind": "full"
+          }
+        ]
+      },
+      "target_input": {
+        "algebra": "C2",
+        "hypermultiplets": [
+          {
+            "representation": "fundamental",
+            "number": 6,
+            "kind": "full"
+          }
+        ]
+      },
+      "program": "#: MaxTermSize 600000\nOff statistics;\nS m,n,y,idx1,idx2,j,z,u,t(:18);\nCF d,C0,C1;\nPolyRatFun d;\nFunction Kvec,Khyp;\n\nL J=sum_(idx1,0,6,m^idx1)\n   *sum_(idx2,0,6,n^idx2);\nid m=t^3*y;\nid n=t^3/y;\n.sort\n\nL itotal=sum_(j,1,9,(Kvec(t^j,y^j,u^j)*C0(j)+12*Khyp(t^j,y^j,u^j)*C1(j))/j);\nid Kvec(t?,y?,u?)=J*(t^2*u^2-t^4/u^2-t^3*y-t^3/y+2*t^6);\nid Khyp(t?,y?,u?)=J*(t^2/u-t^4*u);\n.sort\n\nL I=z;\nid z=z*itotal;\n#do i=2,9\n  id z=1+z*itotal/`i';\n  .sort:step `i';\n#enddo\n.sort\n\nL result=1+I;\nid z=1;\n.sort\nPrint result;\n.end\n",
+      "source_form_calls": 1,
+      "target_form_calls": 0,
+      "target_parse_calls": 0,
+      "target_decode_calls": 1,
+      "rows_after_source": 1,
+      "rows_after_target": 1,
+      "independent_target_form_calls": 1,
+      "target_matches_independent": true,
+      "final_indices_differ": true,
+      "different_program_missed": true,
+      "example_difference": {
+        "powers": [
+          4,
+          0,
+          -2
+        ],
+        "source": "78",
+        "target": "66"
+      }
+    }
+  ]
+}

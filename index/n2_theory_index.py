@@ -7,6 +7,7 @@ decomposes Adams operations and intermediate character products; character
 orthogonality extracts the final singlet coefficient. The SQLite cache in
 ``index.char_decomposition_cache`` stores decompositions and final singlet
 coefficients using Cartan types, Dynkin labels and Adams powers.
+The separate FORM expansion cache stores parsed terms by the raw program text.
 
 For a product gauge group, FORM keeps a separate formal character for each
 simple factor and singlet projection is performed factor by factor.
@@ -15,7 +16,6 @@ simple factor and singlet projection is performed factor by factor.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 from fractions import Fraction
 import json
 from pathlib import Path
@@ -40,11 +40,15 @@ from anomalies.lie_algebra import (
     conjugate_dynkin_labels,
     get_lie_algebra,
 )
-from common.form_utils import run_form, split_signed_terms, split_top_level
 from common.number_utils import as_nonnegative_int
 from index.char_decomposition_cache import (
     AdamsPowers,
     CharacterDecompositionCache,
+)
+from index.form_expansion_cache import (
+    DEFAULT_FORM_CACHE_DATABASE,
+    FormExpansionCache,
+    IndexFormTerm,
 )
 
 
@@ -59,28 +63,6 @@ INDEX_POLYNOMIAL_RING = LaurentPolynomialRing(
     QQ, 3, names=("t", "y", "u")
 )
 _INDEX_POLYNOMIAL_TEXT_PATTERN = re.compile(r"[0-9tyu+\-*/^()\s]+")
-
-
-@dataclass(frozen=True)
-class FormTerm:
-    """One FORM monomial before gauge-singlet projection."""
-
-    # Coefficient of the term
-    coefficient: Fraction
-    # Power of t
-    t_power: int
-    # Power of y fugacity
-    y_power: int
-    # Power of u fugacity
-    u_power: int
-    # products of characters with (character index, Adams powers of the character)
-    characters: tuple[tuple[int, AdamsPowers], ...]
-
-
-_RATIONAL_RE = re.compile(r"d\((-?\d+),(-?\d+)\)\Z")
-_CHARACTER_RE = re.compile(r"C(\d+)\((\d+)\)(?:\^(\d+))?\Z")
-_FUGACITY_RE = re.compile(r"([tyu])(?:\^(-?\d+))?\Z")
-_INTEGER_RE = re.compile(r"\d+\Z")
 
 
 def _parse_input(
@@ -236,73 +218,8 @@ Print result;
 """
 
 
-def _canonical_character_powers(raw: dict[int, int]) -> AdamsPowers:
-    """Convert a mapping from Adams operation index to power to one formal character."""
-    order = sum(adams * exponent for adams, exponent in raw.items())
-    return tuple(raw.get(adams, 0) for adams in range(1, order + 1))
-
-
-def _parse_form_output(output: str) -> list[FormTerm]:
-    """Parse FORM's exact flat polynomial without passing through floats."""
-    marker = "result ="
-    if marker not in output:
-        raise RuntimeError(f"FORM output does not contain {marker!r}")
-    expression = "".join(output.split(marker, 1)[1].split())
-    if expression.endswith(";"):
-        expression = expression[:-1]
-    if not expression:
-        raise RuntimeError("FORM returned an empty result")
-
-    terms: list[FormTerm] = []
-    for raw_term in split_signed_terms(expression):
-        sign = 1
-        if raw_term.startswith("+"):
-            raw_term = raw_term[1:]
-        elif raw_term.startswith("-"):
-            raw_term = raw_term[1:]
-            sign = -1
-
-        coefficient = Fraction(sign)
-        powers = {"t": 0, "y": 0, "u": 0}
-        characters: dict[int, dict[int, int]] = {}
-        for factor in split_top_level(raw_term, "*"):
-            if match := _RATIONAL_RE.fullmatch(factor):
-                coefficient *= Fraction(int(match.group(1)), int(match.group(2)))
-            elif match := _CHARACTER_RE.fullmatch(factor):
-                character = int(match.group(1))
-                adams = int(match.group(2))
-                exponent = int(match.group(3) or 1)
-                character_powers = characters.setdefault(character, {})
-                character_powers[adams] = (
-                    character_powers.get(adams, 0) + exponent
-                )
-            elif match := _FUGACITY_RE.fullmatch(factor):
-                powers[match.group(1)] += int(match.group(2) or 1)
-            elif _INTEGER_RE.fullmatch(factor):
-                coefficient *= int(factor)
-            else:
-                raise RuntimeError(
-                    f"could not parse FORM factor {factor!r} in {raw_term!r}"
-                )
-
-        character_key = tuple(
-            (character, _canonical_character_powers(character_powers))
-            for character, character_powers in sorted(characters.items())
-        )
-        terms.append(
-            FormTerm(
-                coefficient,
-                powers["t"],
-                powers["y"],
-                powers["u"],
-                character_key,
-            )
-        )
-    return terms
-
-
 def _project_terms(
-    terms: list[FormTerm],
+    terms: list[IndexFormTerm],
     factors: tuple[GaugeFactorData, ...],
     character_specs: tuple[CharacterSpec, ...],
     cache: CharacterDecompositionCache,
@@ -402,6 +319,7 @@ def calculate_index(
     *,
     cache_directory: str | Path | None = None,
     database_path: str | Path | None = None,
+    form_cache_database_path: str | Path | None = None,
     lie_executable: str = "lie",
     form_executable: str = "form",
     timeout: float = 600,
@@ -412,6 +330,8 @@ def calculate_index(
     The default SQLite cache is ``char_decomposition_cache.db`` at the
     project root. Select a file with ``database_path`` or place the default
     filename in a custom ``cache_directory``; do not supply both.
+    Parsed FORM expansions use ``form_expansion_cache.db`` in the same
+    directory, unless ``form_cache_database_path`` selects another file.
     """
     order = as_nonnegative_int(order, "order")
     factors, hypermultiplets = _parse_input(data)
@@ -422,6 +342,7 @@ def calculate_index(
         order,
         cache_directory=cache_directory,
         database_path=database_path,
+        form_cache_database_path=form_cache_database_path,
         lie_executable=lie_executable,
         form_executable=form_executable,
         timeout=timeout,
@@ -436,6 +357,7 @@ def calculate_index_internal(
     *,
     cache_directory: str | Path | None = None,
     database_path: str | Path | None = None,
+    form_cache_database_path: str | Path | None = None,
     lie_executable: str = "lie",
     form_executable: str = "form",
     timeout: float = 600,
@@ -456,12 +378,6 @@ def calculate_index_internal(
         vector_characters,
         matter_multiplicities,
     )
-    form_output = run_form(
-        program,
-        form_executable=form_executable,
-        timeout=timeout,
-    )
-    terms = _parse_form_output(form_output)
     with CharacterDecompositionCache(
         cache_directory,
         database_path=database_path,
@@ -469,6 +385,16 @@ def calculate_index_internal(
         timeout=timeout,
         max_workers=processes,
     ) as cache:
+        if form_cache_database_path is None:
+            form_cache_database_path = (
+                cache.database_path.parent / DEFAULT_FORM_CACHE_DATABASE.name
+            )
+        with FormExpansionCache(
+            database_path=form_cache_database_path,
+            form_executable=form_executable,
+            timeout=timeout,
+        ) as form_cache:
+            terms = form_cache.get_expansion(program)
         projected = _project_terms(terms, factors, character_specs, cache)
     return _to_sage_polynomial(projected)
 
@@ -498,12 +424,17 @@ def main(argv: list[str] | None = None) -> int:
     cache_options.add_argument(
         "--cache-directory",
         type=Path,
-        help="directory containing char_decomposition_cache.db",
+        help="directory containing the character and FORM expansion caches",
     )
     cache_options.add_argument(
         "--cache-database",
         type=Path,
         help="SQLite cache file (default: project-root char_decomposition_cache.db)",
+    )
+    parser.add_argument(
+        "--form-cache-database",
+        type=Path,
+        help="FORM expansion cache file (default: beside the character cache)",
     )
     parser.add_argument(
         "--processes",
@@ -518,6 +449,7 @@ def main(argv: list[str] | None = None) -> int:
             args.order,
             cache_directory=args.cache_directory,
             database_path=args.cache_database,
+            form_cache_database_path=args.form_cache_database,
             processes=args.processes,
         )
     except (

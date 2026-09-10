@@ -2,3 +2,5 @@
 /index/char_decomposition_cache_data/
 /char_decomposition_cache.db
 /char_decomposition_cache.db-*
+/form_expansion_cache.db
+/form_expansion_cache.db-*

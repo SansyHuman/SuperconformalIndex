@@ -1,0 +1,110 @@
+{
+  "input": {
+    "algebra": "A32",
+    "full_fundamental_hypers": 66,
+    "order": 18
+  },
+  "workers": 1,
+  "timeout": null,
+  "timing": "wall clock; one cold run and one warm run in the same Sage process",
+  "phases": {
+    "cold": {
+      "check_input_data": {
+        "calls": 1,
+        "seconds": 4.482761370003573
+      },
+      "_parse_input": {
+        "calls": 1,
+        "seconds": 4.482818110001972
+      },
+      "_character_basis": {
+        "calls": 1,
+        "seconds": 0.00019111200526822358
+      },
+      "_build_form_program": {
+        "calls": 1,
+        "seconds": 6.4820051193237305e-06
+      },
+      "run_form": {
+        "calls": 1,
+        "seconds": 1.3569938860018738
+      },
+      "_parse_form_output": {
+        "calls": 1,
+        "seconds": 0.2116992189985467
+      },
+      "lie": {
+        "calls": 313,
+        "seconds": 87.76429166606977
+      },
+      "decomposition": {
+        "calls": 89,
+        "seconds": 83.6366578960442
+      },
+      "decomposition_batch": {
+        "calls": 1,
+        "seconds": 83.67580071999691
+      },
+      "partial_tensor": {
+        "calls": 224,
+        "seconds": 4.162494822987355
+      },
+      "singlets": {
+        "calls": 1,
+        "seconds": 88.019736051996
+      },
+      "_project_terms": {
+        "calls": 1,
+        "seconds": 88.22890294098761
+      },
+      "_to_sage_polynomial": {
+        "calls": 1,
+        "seconds": 0.0020268330117687583
+      }
+    },
+    "warm": {
+      "check_input_data": {
+        "calls": 1,
+        "seconds": 0.00935255600779783
+      },
+      "_parse_input": {
+        "calls": 1,
+        "seconds": 0.009391000989126042
+      },
+      "_character_basis": {
+        "calls": 1,
+        "seconds": 0.00019202301336918026
+      },
+      "_build_form_program": {
+        "calls": 1,
+        "seconds": 6.351998308673501e-06
+      },
+      "run_form": {
+        "calls": 1,
+        "seconds": 1.4063837550056633
+      },
+      "_parse_form_output": {
+        "calls": 1,
+        "seconds": 0.2392604070046218
+      },
+      "_project_terms": {
+        "calls": 1,
+        "seconds": 0.1268371250043856
+      },
+      "_to_sage_polynomial": {
+        "calls": 1,
+        "seconds": 0.0010323579917894676
+      }
+    }
+  },
+  "total": {
+    "cold": 94.29263786700903,
+    "warm": 1.7856519509950886
+  },
+  "dominant_lie_call_seconds": 82.6986519810016,
+  "dominant_product": "psi_3(adjoint)^2",
+  "dominant_input_terms_per_factor": 10,
+  "dominant_output_terms": 91,
+  "index_monomials": 117,
+  "cold_warm_exact_match": true
+}

@@ -44,7 +44,7 @@ DecompositionRequest = tuple[str, DynkinLabels, AdamsPowers]
 CharacterProduct = tuple[tuple[DynkinLabels, AdamsPowers], ...]
 
 
-DEFAULT_CACHE_DATABASE = Path(__file__).resolve().parents[1] / "char_decomposition_cache.db"
+DEFAULT_CHAR_CACHE_DATABASE = Path(__file__).resolve().parents[1] / "char_decomposition_cache.db"
 _SCHEMA_VERSION = 1
 _CARTAN_TYPE_RE = re.compile(r"(?:[ABCD]\d+|E[678]|F4|G2)\Z")
 _LIE_NOTICE_PREFIX = "New tree space with maximum number of nodes:"
@@ -298,9 +298,9 @@ class CharacterDecompositionCache:
         if database_path is not None:
             path = Path(database_path)
         elif cache_directory is not None:
-            path = Path(cache_directory) / DEFAULT_CACHE_DATABASE.name
+            path = Path(cache_directory) / DEFAULT_CHAR_CACHE_DATABASE.name
         else:
-            path = DEFAULT_CACHE_DATABASE
+            path = DEFAULT_CHAR_CACHE_DATABASE
         self.database_path = path.resolve()
         self.lie_executable = lie_executable
         self.max_nodes = int(max_nodes)
