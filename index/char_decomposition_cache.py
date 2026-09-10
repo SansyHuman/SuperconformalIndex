@@ -16,18 +16,24 @@ decomposed; the complete product is never tensor-decomposed for this projection.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
-from concurrent.futures import ProcessPoolExecutor
-from contextlib import contextmanager
+import argparse
+from collections.abc import Callable, Iterable, Sequence
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from contextlib import contextmanager, ExitStack
 from functools import lru_cache
 import json
+from multiprocessing import get_context
 import os
 from pathlib import Path
 import re
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
+
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from common.number_utils import as_integer, as_nonnegative_int
 
@@ -214,6 +220,14 @@ def _generate_decomposition_in_worker(request: DecompositionRequest) -> Decompos
     # Dependencies were committed by the parent after the preceding level.
     # Return the new value to the parent, which batches writes for this level.
     return _PROCESS_CACHE._calculate_decomposition(*request)
+
+
+def _generate_decomposition_batch_in_worker(
+    requests: Sequence[DecompositionRequest],
+) -> list[tuple[DecompositionRequest, Decomposition]]:
+    """Compute one batch; the parent persists it before advancing the order."""
+    return [(request, _generate_decomposition_in_worker(request))
+            for request in requests]
 
 
 def _format_labels(labels: DynkinLabels) -> str:
@@ -856,3 +870,142 @@ class CharacterDecompositionCache:
             for line in stdout.splitlines()
             if line.strip() and not line.startswith(_LIE_NOTICE_PREFIX)
         ]
+
+
+def build_decomposition_cache(
+    cartan_type: str,
+    dynkin_labels: Iterable[int],
+    max_adams_order: int,
+    *,
+    cache_directory: str | Path | None = None,
+    database_path: str | Path | None = None,
+    processes: int | None = None,
+    lie_executable: str = "lie",
+    timeout: float | None = 600,
+    progress: Callable[[int, int, int], None] | None = None,
+) -> dict[int, int]:
+    """Persist every Adams-character product through ``max_adams_order``.
+
+    At order n, ``frobenius_solve(range(1, n + 1), n)`` enumerates every
+    nonnegative vector (a_1, ..., a_n) with sum(j*a_j) = n. Lower orders are
+    committed first, so a composite product needs just one tensor operation
+    on cached factors. Only a missing individual psi_n(R), n > 1, needs Adams;
+    psi_1(R) and Adams operations on the trivial representation are known.
+
+    Existing rows are skipped. Return {order: total number of products},
+    including reused rows. The optional parent-process callback receives
+    (order, total, computed) after the order has been committed. Completed
+    batches remain usable if a later calculation fails or the build stops.
+
+    A persistent, lazily started process pool divides each order into batches.
+    Use processes=1 to run serially; the default uses the available CPU count.
+    Scripts using multiple processes should call this under a __main__ guard.
+    Cache path options follow CharacterDecompositionCache's conventions.
+    """
+    algebra, labels, _ = _canonical_request(cartan_type, dynkin_labels, (1,))
+    maximum = as_nonnegative_int(max_adams_order, "maximum Adams order")
+    if maximum == 0:
+        raise ValueError("maximum Adams order must be positive")
+    workers = (os.cpu_count() or 1) if processes is None else as_nonnegative_int(
+        processes, "processes"
+    )
+    if workers == 0:
+        raise ValueError("processes must be positive")
+
+    # Enumeration needs OR-Tools; normal cache lookups should not import it.
+    from common.math_utils import frobenius_solve
+
+    totals = {}
+    with ExitStack() as stack:
+        cache = stack.enter_context(CharacterDecompositionCache(
+            cache_directory, database_path=database_path,
+            lie_executable=lie_executable, timeout=timeout, max_workers=1,
+        ))
+        executor = None
+        for order in range(1, maximum + 1):
+            solutions = sorted(frobenius_solve(range(1, order + 1), order))
+            # Check only keys; a resumed build need not decode completed rows.
+            rows = cache._connection().execute(
+                "SELECT adams_powers FROM character_decompositions "
+                "WHERE algebra=? AND dynkin_labels=? AND adams_order=?",
+                (algebra, _json_key(labels), order),
+            )
+            known = {tuple(json.loads(row[0])) for row in rows}
+            missing = [(algebra, labels, tuple(powers)) for powers in solutions
+                       if tuple(powers) not in known]
+
+            if missing and (workers == 1 or len(missing) == 1 or not any(labels)):
+                # Batch commits also release completed work on an exception.
+                with cache._batch_decompositions():
+                    for request in missing:
+                        cache.get_decomposition(*request)
+            elif missing:
+                if executor is None:
+                    # Spawn avoids inheriting SQLite connections or OR-Tools'
+                    # native thread state, and starts workers only as needed.
+                    executor = stack.enter_context(ProcessPoolExecutor(
+                        max_workers=workers, mp_context=get_context("spawn"),
+                        initializer=_initialize_decomposition_worker,
+                        initargs=(str(cache.database_path), cache.lie_executable,
+                                  cache.max_nodes, cache.max_objects, cache.timeout),
+                    ))
+                # Several batches per worker balance uneven tensor costs. Bound
+                # batch size so completed decompositions can be saved promptly.
+                batch_size = min(64, max(1, (len(missing) + 4 * workers - 1) // (4 * workers)))
+                pending = {
+                    executor.submit(_generate_decomposition_batch_in_worker,
+                                    missing[start:start + batch_size])
+                    for start in range(0, len(missing), batch_size)
+                }
+                for future in as_completed(pending):
+                    pending.remove(future)
+                    cache._write_decompositions(future.result())
+                # The next order is not submitted until every batch is stored.
+
+            totals[order] = len(solutions)
+            if progress is not None:
+                progress(order, len(solutions), len(missing))
+    return totals
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Build a complete Adams decomposition cache.")
+    parser.add_argument("cartan_type", help="Cartan type, for example A2, C3, or G2")
+    parser.add_argument("--dynkin-labels", nargs="+", type=int, required=True)
+    parser.add_argument("--max-adams-order", "--max-order", type=int, required=True,
+                        help="largest weighted Adams order to cache")
+    parser.add_argument("--processes", type=int,
+                        help="worker processes (default: CPU count; 1 runs serially)")
+    paths = parser.add_mutually_exclusive_group()
+    paths.add_argument("--cache-directory", type=Path)
+    paths.add_argument("--cache-database", type=Path,
+                       help="SQLite file (default: project-root char_decomposition_cache.db)")
+    parser.add_argument("--lie-executable", default="lie")
+    parser.add_argument("--timeout", type=float, default=600,
+                        help="timeout in seconds per LiE invocation (default: 600)")
+    args = parser.parse_args(argv)
+
+    def report(order, total, computed):
+        print(f"Adams order {order}: {total} cached "
+              f"({computed} computed, {total - computed} reused)", flush=True)
+
+    try:
+        totals = build_decomposition_cache(
+            args.cartan_type, args.dynkin_labels, args.max_adams_order,
+            cache_directory=args.cache_directory, database_path=args.cache_database,
+            processes=args.processes, lie_executable=args.lie_executable,
+            timeout=args.timeout, progress=report,
+        )
+    except (OSError, sqlite3.Error, ArithmeticError, TypeError, ValueError, RuntimeError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    path = args.cache_database or (
+        args.cache_directory / DEFAULT_CHAR_CACHE_DATABASE.name
+        if args.cache_directory is not None else DEFAULT_CHAR_CACHE_DATABASE
+    )
+    print(f"Cache ready: {sum(totals.values())} decompositions in {path.resolve()}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
