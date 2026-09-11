@@ -3,7 +3,7 @@ import json
 import sys
 import time
 from functools import wraps
-ROOT = Path('/home/subo-lee/PycharmProjects/SuperconformalIndex')
+ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT))
 from index import n2_theory_index as idx
 from index.char_decomposition_cache import CharacterDecompositionCache

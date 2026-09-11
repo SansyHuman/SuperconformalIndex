@@ -1,4 +1,4 @@
-# N=2 landscape GUI
+# N2SCFTDB GUI
 
 Run from the project root using the existing Sage environment (PyQt6 is installed):
 
@@ -30,6 +30,12 @@ over default values and environment variables. On Linux the settings file is
 Other platforms use Qt's generic per-user configuration directory. Persistence
 uses [QSettings](https://doc.qt.io/qt-6/qsettings.html) in INI format, with atomic
 file replacement and owner-only permissions (0600 on POSIX).
+
+The configuration directory and keyring service retain their original identifiers
+for compatibility with saved preferences and passwords. These are storage IDs,
+not the current project name. Cache paths inside the previous sibling checkout
+are rebased to the current `N2SCFTDB` root when loaded and persisted on the next
+settings save. Custom cache paths outside the previous checkout stay as entered.
 
 Passwords are stored in the native system credential vault via
 [Python keyring](https://keyring.readthedocs.io/en/latest/): Linux Secret Service

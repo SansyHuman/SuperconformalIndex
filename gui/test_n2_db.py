@@ -313,6 +313,34 @@ window.close()
         self.assertEqual(self.store.load()["mysql/password"], "first profile dummy")
         self.assertEqual(other.load()["mysql/password"], "second profile dummy")
 
+    def test_project_rename_rebases_cache_paths_without_touching_credentials(self):
+        renamed_root = Path(self.temp.name) / "N2SCFTDB"
+        previous_root = renamed_root.with_name("SuperconformalIndex")
+        values = default_settings()
+        values["cache/character_database"] = str(previous_root / "char_decomposition_cache.db")
+        values["cache/form_database"] = str(previous_root / "custom" / "form.db")
+        values["mysql/password"] = "rename test credential"
+        self.store.save(values)
+        old_credentials = dict(self.vault.records)
+        original_file = self.store.path.read_bytes()
+        with patch("gui.n2_db.PROJECT_ROOT", renamed_root):
+            loaded = self.store.load()
+        self.assertEqual(loaded["cache/character_database"], str(renamed_root / "char_decomposition_cache.db"))
+        self.assertEqual(loaded["cache/form_database"], str(renamed_root / "custom" / "form.db"))
+        self.assertEqual(loaded["mysql/password"], "rename test credential")
+        self.assertEqual(self.vault.records, old_credentials)
+        self.assertEqual(self.store.path.read_bytes(), original_file)
+
+    def test_project_rename_preserves_external_cache_paths(self):
+        values = default_settings()
+        values["cache/character_database"] = "/custom/cache/characters.db"
+        values["cache/form_database"] = "/custom/cache/form.db"
+        self.store.save(values)
+        with patch("gui.n2_db.PROJECT_ROOT", Path(self.temp.name) / "N2SCFTDB"):
+            loaded = self.store.load()
+        for key in ("cache/character_database", "cache/form_database"):
+            self.assertEqual(loaded[key], values[key])
+
     def test_vault_errors_are_sanitized_and_missing_entries_raise(self):
         vault = PasswordVault()
         with patch.object(vault, "_get_backend") as backend:

@@ -8,6 +8,7 @@ class PasswordStorageError(OSError):
 
 
 class PasswordVault:
+    # Stable credential identity across the project rename to N2SCFTDB.
     SERVICE = "SuperconformalIndex.N2Database.MySQL"
 
     def __init__(self):

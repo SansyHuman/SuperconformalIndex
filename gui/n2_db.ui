@@ -3,7 +3,7 @@
  <class>N2DatabaseWindow</class>
  <widget class="QMainWindow" name="N2DatabaseWindow">
   <property name="geometry"><rect><x>0</x><y>0</y><width>960</width><height>680</height></rect></property>
-  <property name="windowTitle"><string>N=2 Landscape</string></property>
+  <property name="windowTitle"><string>N2SCFTDB</string></property>
   <widget class="QWidget" name="centralwidget">
    <layout class="QVBoxLayout" name="mainLayout">
     <item>

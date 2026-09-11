@@ -12,7 +12,7 @@ import sqlite3
 import sys
 import tempfile
 import time
-ROOT=Path('/home/subo-lee/PycharmProjects/SuperconformalIndex')
+ROOT=Path(__file__).resolve().parents[3]
 sys.path.insert(0,str(ROOT))
 import baseline_cache as old
 import candidate_cache as new

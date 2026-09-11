@@ -1,5 +1,10 @@
 # PDF sources and rebuilding
 
+The 11 September 2026 project rename updates both PDFs to **N2SCFTDB**,
+including titles, running headers and PDF metadata. Mathematical content and
+dated benchmark/test evidence remain unchanged. The sources rebuild from any
+checkout directory, including `/home/subo-lee/PycharmProjects/N2SCFTDB`.
+
 Both final PDFs have retained LaTeX sources in this directory:
 
 - `n2_implementation_reference_summary.tex` builds the package reference here.

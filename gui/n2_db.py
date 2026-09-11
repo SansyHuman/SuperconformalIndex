@@ -50,6 +50,7 @@ class SettingsStore:
             config_root = QtCore.QStandardPaths.writableLocation(
                 QtCore.QStandardPaths.StandardLocation.GenericConfigLocation
             )
+            # Stable storage identity: keep preferences across the N2SCFTDB rename.
             filename = Path(config_root) / "SuperconformalIndex" / "n2_db.ini"
         self.path = Path(filename).expanduser().resolve()
         self.vault = vault if vault is not None else PasswordVault()
@@ -76,6 +77,14 @@ class SettingsStore:
                 values[key] = settings.value(key, default, type=type(default))
             except (TypeError, ValueError):
                 values[key] = default
+        if PROJECT_ROOT.name == "N2SCFTDB":
+            previous_root = PROJECT_ROOT.with_name("SuperconformalIndex")
+            for key in ("cache/character_database", "cache/form_database"):
+                try:
+                    relative = Path(values[key]).relative_to(previous_root)
+                except ValueError:
+                    continue
+                values[key] = str(PROJECT_ROOT / relative)
         if settings.contains("mysql/password_id"):
             credential_id = settings.value("mysql/password_id", type=str)
             # An empty reference means an explicitly saved empty password, which
@@ -257,7 +266,7 @@ class N2DatabaseWindow(QtWidgets.QMainWindow):
 
 def main() -> int:
     app = QtWidgets.QApplication(sys.argv)
-    app.setOrganizationName("SuperconformalIndex")
+    app.setOrganizationName("N2SCFTDB")
     app.setApplicationName("N2Database")
     window = N2DatabaseWindow()
     window.show()

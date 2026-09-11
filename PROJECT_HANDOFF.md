@@ -1,6 +1,32 @@
-# SuperconformalIndex Project Handoff
+# N2SCFTDB Project Handoff
 
-Last updated: **2026-09-10 (Asia/Seoul)**.
+Last updated: **2026-09-11 (Asia/Seoul)**.
+
+## Project rename and GUI update (11 September 2026)
+
+The project and GitHub repository are named **N2SCFTDB**. The repository URL is
+`https://github.com/SansyHuman/N2SCFTDB` and the local checkout is
+`/home/subo-lee/PycharmProjects/N2SCFTDB`.
+
+The code is now committed through `f96b16c` (GUI shell). The `gui/` directory
+contains the editable `n2_db.ui` and `settings.ui` forms, a PyQt6 launcher,
+per-user settings, and native keyring password storage. The anomaly and index
+tabs are empty. The GUI has 18 passing isolated regressions and a passing
+disposable Linux Secret Service integration check from the GUI implementation
+session; these counts are separate from the backend suite below.
+
+The rename updates project labels, IDE module references, portable benchmark
+script roots, and both PDF sources and outputs. The GUI retains its established
+settings directory and keyring service identity so existing saved preferences
+and credentials remain accessible; cache paths under the former checkout are
+rebased to the renamed project when loaded. See `gui/README.md` for details.
+The rename does not commit, stage, push, or change Git history. Its validation
+passes all 20 GUI regressions, including relocation and external-cache-path checks.
+The rebuilt PDFs retain 34 and 20 pages, with body text unchanged apart from
+project branding and no unresolved references or overfull boxes.
+
+The remaining implementation narrative and measured results below describe
+the explicitly dated 10 September snapshot; renaming does not rerun benchmarks.
 
 ## Where this session stopped
 
@@ -57,7 +83,7 @@ Treat this document as context; future work depends on the user's next request.
 Project root:
 
 ```text
-/home/subo-lee/PycharmProjects/SuperconformalIndex
+/home/subo-lee/PycharmProjects/N2SCFTDB
 ```
 
 The project studies four-dimensional N=2 Lagrangian superconformal field
@@ -434,7 +460,7 @@ validation.
 The property-calculation cache is intentionally stored at the project root:
 
 ```text
-/home/subo-lee/PycharmProjects/SuperconformalIndex/char_decomposition_cache.db
+/home/subo-lee/PycharmProjects/N2SCFTDB/char_decomposition_cache.db
 ```
 
 The property calculator computes the Coulomb-branch index through scaling

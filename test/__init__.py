@@ -1,1 +1,1 @@
-"""Tests for the SuperconformalIndex project."""
+"""Tests for the N2SCFTDB project."""
