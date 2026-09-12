@@ -8,7 +8,8 @@ anomaly checks pass and every one-loop gauge beta function vanishes.
 The database keeps theory-wide properties in shared tables and realization
 data in separate Lagrangian tables.  A placeholder table for non-Lagrangian
 realizations makes it possible to attach other descriptions to the same
-theory later.
+theory later. Initial imports store only basic properties. Run
+``common/n2_theory_db_indices.py`` separately to fill or upgrade indices.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ if __package__:
         optional_json_text as _optional_json_text,
     )
     from .n2_theory_properties import calculate_n2_theory_properties
+    from .number_utils import as_nonnegative_fraction, as_nonnegative_int
 else:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from common.json_utils import (
@@ -40,6 +42,7 @@ else:
         optional_json_text as _optional_json_text,
     )
     from common.n2_theory_properties import calculate_n2_theory_properties
+    from common.number_utils import as_nonnegative_fraction, as_nonnegative_int
 
 from anomalies.check_n2_anomalies import (
     HyperData,
@@ -49,7 +52,7 @@ from anomalies.check_n2_anomalies import (
 from anomalies.lie_algebra import conjugate_dynkin_labels
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS schema_metadata (
@@ -122,6 +125,8 @@ CREATE TABLE IF NOT EXISTS theory_properties (
     coulomb_branch_index_json JSON NULL,
     coulomb_branch_spectrum_json JSON NULL,
     superconformal_index_json JSON NULL,
+    superconformal_index_order BIGINT UNSIGNED NULL,
+    coulomb_branch_index_max_dimension_json JSON NULL,
     properties_json JSON NOT NULL,
     PRIMARY KEY (theory_id),
     KEY idx_theory_properties_central_charge_a (
@@ -374,6 +379,13 @@ SCHEMA_MIGRATIONS = {
         ALTER TABLE flavor_symmetry_factors
             DROP COLUMN full_hypermultiplets,
             DROP COLUMN half_hypermultiplets
+        """,
+    ),
+    6: (
+        """
+        ALTER TABLE theory_properties
+            ADD COLUMN superconformal_index_order BIGINT UNSIGNED NULL,
+            ADD COLUMN coulomb_branch_index_max_dimension_json JSON NULL
         """,
     ),
 }
@@ -651,11 +663,6 @@ def _shared_properties(properties: dict[str, Any]) -> dict[str, Any]:
             "conformal_manifold_dimension"
         ],
         "central_charges": properties["central_charges"],
-        "coulomb_branch_index": properties["coulomb_branch_index"],
-        "coulomb_branch_spectrum": properties[
-            "coulomb_branch_spectrum"
-        ],
-        "superconformal_index": properties["superconformal_index"],
     }
 
 
@@ -723,44 +730,26 @@ def _insert_shared_properties(
     normalized_shared = json.loads(serialized)
     existing = _fetchone(
         connection,
-        "SELECT properties_json FROM theory_properties WHERE theory_id = %s",
+        "SELECT properties_json FROM theory_properties WHERE theory_id = %s FOR UPDATE",
         (theory_id,),
     )
     if existing is not None:
         existing_properties = existing["properties_json"]
         if isinstance(existing_properties, str):
             existing_properties = json.loads(existing_properties)
-        # Older JSON may retain the split even after the schema upgrade.
-        comparable_properties = {
-            **existing_properties,
-            "flavor_symmetry": _shared_flavor_symmetry(
-                existing_properties["flavor_symmetry"]
-            ),
-        }
-        legacy_properties = dict(normalized_shared)
-        legacy_properties.pop("coulomb_branch_spectrum")
-        if comparable_properties not in (normalized_shared, legacy_properties):
+        # Compare only basic physical properties. Index availability/precision
+        # belongs to the later enrichment phase and must survive attachment.
+        comparable_properties = _shared_properties(existing_properties)
+        if comparable_properties != normalized_shared:
             raise ValueError(
                 f"theory {theory_id} already has different shared properties"
             )
-        if existing_properties != normalized_shared:
-            _execute(
-                connection,
-                """
-                UPDATE theory_properties
-                SET coulomb_branch_spectrum_json = %s,
-                    properties_json = %s
+        normalized_existing = {**existing_properties, **normalized_shared}
+        if existing_properties != normalized_existing:
+            _execute(connection, """
+                UPDATE theory_properties SET properties_json = %s
                 WHERE theory_id = %s
-                """,
-                (
-                    _optional_json_text(
-                        properties["coulomb_branch_spectrum"]
-                    ),
-                    serialized,
-                    theory_id,
-                ),
-            )
-            return
+            """, (_json_text(normalized_existing, canonical=True), theory_id))
         return
 
     flavor = shared["flavor_symmetry"]
@@ -788,9 +777,9 @@ def _insert_shared_properties(
             flavor["dimension"],
             properties["conformal_manifold_dimension"],
             _optional_json_text(properties["central_charges"]),
-            _optional_json_text(properties["coulomb_branch_index"]),
-            _optional_json_text(properties["coulomb_branch_spectrum"]),
-            _optional_json_text(properties["superconformal_index"]),
+            None,
+            None,
+            None,
             serialized,
         ),
     )
@@ -1066,7 +1055,10 @@ def store_lagrangian_theory(
     name: str | None = None,
     theory_id: int | None = None,
 ) -> StoredTheory:
-    """Check a theory and atomically store its properties and realization.
+    """Check a theory and atomically store basic properties and its realization.
+
+    Both indices, their cutoffs, and the Coulomb spectrum start as SQL NULL.
+    No index or spectrum calculation occurs during insertion or reimport.
 
     Reimporting the same normalized Lagrangian realization is idempotent.  Set
     theory_id to attach a new realization, such as a dual description, to an
@@ -1154,6 +1146,282 @@ def store_lagrangian_theory(
         gauge_group=anomaly_result["group"],
         canonical_hash=canonical_hash,
     )
+
+
+# Column names are fixed here; values always use MySQL parameters.
+_INDEX_COLUMNS = {
+    "superconformal_index": "superconformal_index_json",
+    "superconformal_index_order": "superconformal_index_order",
+    "coulomb_branch_index": "coulomb_branch_index_json",
+    "coulomb_branch_index_max_dimension": "coulomb_branch_index_max_dimension_json",
+    "coulomb_branch_spectrum": "coulomb_branch_spectrum_json",
+}
+_INDEX_CUTOFFS = {
+    "superconformal_index": "superconformal_index_order",
+    "coulomb_branch_index": "coulomb_branch_index_max_dimension",
+}
+
+
+def _decode_json(value: Any) -> Any:
+    return json.loads(value) if isinstance(value, (str, bytes)) else value
+
+
+def _exact_cutoff(value: Any, *, full_index: bool = False) -> int | Fraction:
+    if full_index:
+        result = as_nonnegative_int(value, "superconformal_index_order")
+        if result > 2**64 - 1:
+            raise ValueError("superconformal_index_order exceeds MySQL BIGINT UNSIGNED")
+        return result
+    if isinstance(value, dict):
+        if set(value) != {"numerator", "denominator"}:
+            raise ValueError("exact cutoff requires numerator and denominator")
+        numerator = as_nonnegative_int(value["numerator"], "cutoff numerator")
+        denominator = as_nonnegative_int(value["denominator"], "cutoff denominator")
+        if denominator == 0:
+            raise ValueError("cutoff denominator must be positive")
+        value = Fraction(numerator, denominator)
+    return as_nonnegative_fraction(value, "coulomb_branch_index_max_dimension")
+
+
+def _index_state(row: dict[str, Any]) -> dict[str, Any]:
+    state = {}
+    for key, column in _INDEX_COLUMNS.items():
+        value = row[column]
+        if key != "superconformal_index_order":
+            value = _decode_json(value)
+        if value is not None and key in _INDEX_CUTOFFS.values():
+            value = _exact_cutoff(value, full_index=key == "superconformal_index_order")
+        state[key] = value
+    return state
+
+
+def _index_replacement_reason(value: Any, old_cutoff: Any, new_cutoff: Any) -> str:
+    if value is None:
+        return "missing"
+    if old_cutoff is None:
+        return "unknown_precision"
+    if new_cutoff > old_cutoff:
+        return "higher_order"
+    return "equal_order" if new_cutoff == old_cutoff else "lower_order"
+
+
+def _locked_index_row(connection: Connection, realization_id: int) -> dict[str, Any]:
+    row = _fetchone(connection, """
+        SELECT p.*, lr.id AS realization_id
+        FROM theory_properties AS p
+        JOIN lagrangian_realizations AS lr ON lr.theory_id = p.theory_id
+        WHERE lr.id = %s
+        FOR UPDATE
+    """, (realization_id,))
+    if row is None:
+        raise ValueError(f"unknown Lagrangian realization {realization_id}")
+    return row
+
+
+def _write_index_changes(
+    connection: Connection, row: dict[str, Any], changes: dict[str, Any]
+) -> None:
+    if not changes:
+        return
+    # Read and merge while holding the row lock, preserving basic properties
+    # and any independent index update committed during the calculation.
+    combined = {**_decode_json(row["properties_json"]), **changes}
+    assignments = [f"{_INDEX_COLUMNS[key]} = %s" for key in changes]
+    values = [
+        value if key == "superconformal_index_order" else _optional_json_text(value)
+        for key, value in changes.items()
+    ]
+    _execute(connection, f"""
+        UPDATE theory_properties
+        SET {', '.join(assignments)}, properties_json = %s
+        WHERE theory_id = %s
+    """, (*values, _json_text(combined, canonical=True), row["theory_id"]))
+    _execute(connection, """
+        UPDATE theories SET updated_at = CURRENT_TIMESTAMP WHERE id = %s
+    """, (row["theory_id"],))
+
+
+def update_lagrangian_indices(
+    connection: Connection, realization_id: int, indices: dict[str, Any]
+) -> dict[str, Any]:
+    """Atomically fill or upgrade a realization's shared theory indices.
+
+    Accept the result of ``calculate_n2_theory_indices`` or any subset of its
+    three computed fields with their corresponding cutoffs. None/omitted fields
+    are left alone. A supplied index requires a nonnegative explicit cutoff;
+    never infer precision from the highest nonzero monomial. Equal or lower
+    cutoffs keep the stored index. Unknown legacy precision also keeps it;
+    use ``record_lagrangian_index_cutoffs`` when its original cutoff is known.
+    Spectra are complete: fill missing spectra and reject conflicting ones.
+
+    The connection must have an initialized schema and no caller transaction.
+    Calculation belongs outside this short transaction. Row locking makes
+    competing workers recheck the latest stored precision before writing.
+    """
+    unknown = set(indices) - _INDEX_COLUMNS.keys()
+    if unknown:
+        raise ValueError(f"unknown index fields: {sorted(unknown)}")
+    incoming = {}
+    for key, cutoff_key in _INDEX_CUTOFFS.items():
+        value = indices.get(key)
+        cutoff = indices.get(cutoff_key)
+        if value is None:
+            if cutoff is not None:
+                raise ValueError(f"{cutoff_key} requires {key}")
+            continue
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"{key} must be a nonempty serialized index string")
+        if cutoff is None:
+            raise ValueError(f"{key} requires {cutoff_key}")
+        incoming[key] = value
+        incoming[cutoff_key] = _exact_cutoff(
+            cutoff, full_index=key == "superconformal_index"
+        )
+    spectrum = indices.get("coulomb_branch_spectrum")
+    if spectrum is not None:
+        if not isinstance(spectrum, (list, tuple)):
+            raise ValueError("coulomb_branch_spectrum must be a sequence of dimensions")
+        spectrum = tuple(sorted(_exact_cutoff(value) for value in spectrum))
+        if any(value <= 0 for value in spectrum):
+            raise ValueError("Coulomb generator dimensions must be positive")
+        incoming["coulomb_branch_spectrum"] = spectrum
+
+    connection.begin()
+    try:
+        row = _locked_index_row(connection, realization_id)
+        state = _index_state(row)
+        changes, skipped = {}, {}
+        for key, cutoff_key in _INDEX_CUTOFFS.items():
+            if key not in incoming:
+                continue
+            reason = _index_replacement_reason(
+                state[key], state[cutoff_key], incoming[cutoff_key]
+            )
+            if reason in ("missing", "higher_order"):
+                changes[key] = incoming[key]
+                changes[cutoff_key] = incoming[cutoff_key]
+            else:
+                skipped[key] = reason
+        if "coulomb_branch_spectrum" in incoming:
+            previous = state["coulomb_branch_spectrum"]
+            if previous is None:
+                changes["coulomb_branch_spectrum"] = spectrum
+            elif tuple(sorted(_exact_cutoff(value) for value in previous)) != spectrum:
+                raise ValueError("stored Coulomb spectrum conflicts with the supplied spectrum")
+            else:
+                skipped["coulomb_branch_spectrum"] = "already_present"
+        _write_index_changes(connection, row, changes)
+        connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
+    return {
+        "theory_id": int(row["theory_id"]),
+        "lagrangian_realization_id": realization_id,
+        "updated_fields": list(changes), "skipped_fields": skipped,
+    }
+
+
+def record_lagrangian_index_cutoffs(
+    connection: Connection, realization_id: int, *,
+    order: Any | None = None, max_dimension: Any | None = None,
+) -> None:
+    """Record known original cutoffs for legacy indices, without recomputation.
+
+    Supply cutoffs from the original calculation, not its highest nonzero term.
+    Existing known cutoffs cannot be changed. The initialized connection must
+    have no caller transaction. Both metadata columns and combined JSON update
+    atomically, allowing subsequent normal upgrades of legacy results.
+    """
+    requested = {}
+    if order is not None:
+        requested["superconformal_index"] = _exact_cutoff(order, full_index=True)
+    if max_dimension is not None:
+        requested["coulomb_branch_index"] = _exact_cutoff(max_dimension)
+    if not requested:
+        raise ValueError("supply at least one known cutoff")
+    connection.begin()
+    try:
+        row = _locked_index_row(connection, realization_id)
+        state = _index_state(row)
+        changes = {}
+        for key, cutoff in requested.items():
+            cutoff_key = _INDEX_CUTOFFS[key]
+            if state[key] is None:
+                raise ValueError(f"cannot record precision for missing {key}")
+            if state[cutoff_key] is None:
+                changes[cutoff_key] = cutoff
+            elif state[cutoff_key] != cutoff:
+                raise ValueError(f"{key} already has a different known cutoff")
+        _write_index_changes(connection, row, changes)
+        connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
+
+
+def iter_lagrangian_index_jobs(
+    connection: Connection, *, order: Any, max_dimension: Any,
+    upgrade: bool = False, batch_size: int = 100,
+):
+    """Stream one realization per theory needing index work, using bounded pages.
+
+    Default selection fills any missing index or spectrum. With ``upgrade``,
+    also select indices with known lower cutoffs. Legacy unknown precision is
+    reported in ``unknown_precision`` and left alone. Complete theories with
+    unknown precision are reported only in upgrade mode. Reads and calculations
+    hold no database row locks; the update API rechecks all write decisions.
+    """
+    order = _exact_cutoff(order, full_index=True)
+    max_dimension = _exact_cutoff(max_dimension)
+    batch_size = as_nonnegative_int(batch_size, "batch_size")
+    if not batch_size:
+        raise ValueError("batch_size must be positive")
+    after_id = 0
+    while True:
+        with connection.cursor(DictCursor) as cursor:
+            cursor.execute("""
+                SELECT p.*, lr.id AS realization_id, lr.input_json
+                FROM lagrangian_realizations AS lr
+                JOIN theory_properties AS p ON p.theory_id = lr.theory_id
+                WHERE lr.id > %s
+                  AND lr.id = (
+                      SELECT MIN(other.id) FROM lagrangian_realizations AS other
+                      WHERE other.theory_id = lr.theory_id
+                  )
+                  AND (%s OR p.superconformal_index_json IS NULL
+                      OR JSON_TYPE(p.superconformal_index_json) = 'NULL'
+                      OR p.coulomb_branch_index_json IS NULL
+                      OR JSON_TYPE(p.coulomb_branch_index_json) = 'NULL'
+                      OR p.coulomb_branch_spectrum_json IS NULL
+                      OR JSON_TYPE(p.coulomb_branch_spectrum_json) = 'NULL')
+                ORDER BY lr.id LIMIT %s
+            """, (after_id, upgrade, batch_size))
+            rows = cursor.fetchall()
+        if not rows:
+            return
+        for row in rows:
+            after_id = int(row["realization_id"])
+            state = _index_state(row)
+            needed, unknown = [], []
+            for key, cutoff in (
+                ("superconformal_index", order),
+                ("coulomb_branch_index", max_dimension),
+            ):
+                reason = _index_replacement_reason(state[key], state[_INDEX_CUTOFFS[key]], cutoff)
+                if reason == "missing" or (upgrade and reason == "higher_order"):
+                    needed.append(key)
+                elif reason == "unknown_precision":
+                    unknown.append(key)
+            if state["coulomb_branch_spectrum"] is None:
+                needed.append("coulomb_branch_spectrum")
+            if needed or (upgrade and unknown):
+                yield {
+                    "theory_id": int(row["theory_id"]),
+                    "lagrangian_realization_id": after_id,
+                    "input": _decode_json(row["input_json"]),
+                    "needed_fields": needed, "unknown_precision": unknown,
+                }
 
 
 def store_lagrangian_theory_from_file(

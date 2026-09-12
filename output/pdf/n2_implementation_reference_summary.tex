@@ -34,7 +34,7 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small\sffamily\color{muted}N2SCFTDB / REFERENCE}
-\fancyhead[R]{\small\sffamily\color{muted}10 September 2026}
+\fancyhead[R]{\small\sffamily\color{muted}12 September 2026}
 \fancyfoot[L]{\footnotesize\color{muted}Mathematics \& implementation \enspace | \enspace consolidated edition}
 \fancyfoot[R]{\small\thepage}
 \renewcommand{\headrulewidth}{0.3pt}
@@ -78,22 +78,22 @@ Exact Lie-algebra data, anomaly checks, superconformal indices,\par
 Coulomb-branch indices and spectra, theory properties,\par
 database persistence, and the planned Higgs-branch extension.
 \vspace{11mm}
-\begin{note}{Index/cache update: reusable expansions and decompositions}
-Exact FORM expansions are now stored by raw program text. Character products
-reuse cached lower-order factors, and a process-pool builder prepares every
-product through a chosen weighted Adams order. This edition explains the
-cutoff proof, APIs, concurrency and measured performance, with current validation.
-The database chapter retains the schema-version-6 reference.
+\begin{note}{Property and database update: two separate stages}
+Anomaly-checked imports now store basic properties first. A separate worker
+fills indices and Coulomb spectra, or upgrades each index only at a higher
+recorded cutoff. Schema 7 preserves legacy results with unknown precision.
+The index/cache algorithms and dated benchmarks remain documented alongside
+the 238-test database implementation validation.
 \end{note}
 \vfill
 \begin{tabularx}{\textwidth}{@{}p{31mm}Y@{}}
 Snapshot & Base reference: 8 September 2026. Database and validation update:
-9 September 2026. Index/cache update: 10 September 2026; \code{04bbe21}.\\
+9 September 2026. Index/cache update: 10 September 2026; \code{04bbe21}. Property/database workflow: 12 September 2026.\\
 Consolidates & \code{index/n2_theory_index_Mathematical_Background.pdf}\newline
 and the previous \code{output/pdf/n2_implementation_reference_summary.pdf}.\\
-Status & FORM expansion persistence, cached-factor planning and complete Adams
-cache builder documented, with measured comparisons and the 209-test snapshot. Database structure retains its version-6 update; unrelated package
-chapters retain the base reference snapshot.
+Status & Basic properties separated from index calculation; schema 7, deferred
+worker, independent precision upgrades and legacy handling documented.
+Unrelated mathematics and benchmark chapters retain their dated snapshots.
 Higgs/Hall--Littlewood material is explicitly marked as proposed, not implemented.\\
 Editing scope & Documentation only. The companion index-background PDF is also
 updated. Unrevised mathematical and package content is preserved.\\
@@ -120,8 +120,9 @@ optional live database integration. & \S\ref{sec:test}\\\bottomrule
 \fcolorbox{accent}{pale}{\parbox{0.89\textwidth}{\centering
 Theory dictionary / JSON\quad$\longrightarrow$\quad validated gauge and hyper data\\[5pt]
 $\longrightarrow$\quad anomaly and conformality checks\\[5pt]
-$\longrightarrow$\quad properties, full index, Coulomb index and spectrum\\[5pt]
-$\longrightarrow$\quad exact JSON and optional MySQL storage}}
+$\longrightarrow$\quad basic properties and optional MySQL insertion\\[5pt]
+$\longrightarrow$\quad separate index / Coulomb-spectrum worker\\[5pt]
+$\longrightarrow$\quad fill missing data or upgrade known lower cutoffs}}
 \end{center}
 Standalone index functions are also callable directly. The property and database
 workflows impose the SCFT-candidate checks; a gauge-invariant counting calculation
@@ -567,7 +568,7 @@ support sizes $N_A,N_B$; constructing the partial decompositions can still domin
 \subsubsection{SQLite schema, exact keys and cache lifetime}
 The character and singlet tables use \code{sqlite3} and default to
 \code{<project-root>/char_decomposition_cache.db}. The independent cache schema
-has \code{PRAGMA user_version=1}; it is unrelated to MySQL theory schema version 6.
+has \code{PRAGMA user_version=1}; it is unrelated to MySQL theory schema version 7.
 \begin{tabularx}{\textwidth}{@{}p{49mm}Y@{}}
 \toprule Table & Columns and primary key\\\midrule
 \code{character_decompositions} & \code{algebra} \code{TEXT},
@@ -819,7 +820,7 @@ only to
  \label{eq:cb-precision}
 \end{equation}
 An order-18 full index can determine Coulomb coefficients through dimension
-nine, not ninety. The property workflow obtains the order-90 Coulomb index
+nine, not ninety. The separate index workflow obtains the order-90 Coulomb index
 directly from Weyl degrees instead. From \eqref{eq:su3-full}, the supported
 Coulomb result is $1+x^2+x^3$ through dimension three.
 
@@ -1143,32 +1144,52 @@ with degrees is explanatory here, not a separate implemented validation step.
 For $SU(3)$ with six full fundamentals, $n_v=8,n_H=18$, so
 $a=29/12$, $c=17/6$ and $4(2a-c)=3+5=8$.
 
-\subsubsection{Current property pipeline}
-\code{calculate_n2_theory_properties(data)} validates the theory once and uses
-the internal gauge/hyper data for subsequent work. If it is an SCFT candidate:
-\begin{enumerate}
-\item Compute flavor metadata, gauge marginal couplings and exact central charges.
-\item Compute the full index through \code{INDEX_MAX_ORDER = 18}.
-\item Build the Coulomb index directly from gauge degrees through
-\code{C_INDEX_MAX_ORDER = 90}, independent of the full-index cutoff.
-\item Return Coulomb generator dimensions directly from the same degrees.
-\end{enumerate}
-For valid non-candidates, SCFT-dependent values are \code{None}; flavor metadata
-is still available. Malformed input raises an error.
-
-\begin{tabularx}{\textwidth}{@{}Yp{60mm}@{}}
-\toprule Property key & Representation in aggregate result\\\midrule
-\code{central_charges} & Exact rational $a,c$ only.\\
-\code{superconformal_index} & Serialized Laurent polynomial string.\\
-\code{coulomb_branch_index} & Serialized $x$-series expression string.\\
-\code{coulomb_branch_spectrum} & Tuple of exact \code{Fraction} dimensions.\\
+\subsubsection{Basic properties without index calculation}
+\code{calculate_n2_theory_properties(data)} validates the input and returns
+flavor metadata, gauge marginal couplings, conformal-manifold dimension and
+exact central charges. It never computes a full index, a Coulomb index or the
+Coulomb spectrum; those keys are omitted from the basic dictionary.
+\begin{tabularx}{\textwidth}{@{}Y>{\raggedright\arraybackslash}p{59mm}@{}}
+\toprule Basic property key & Representation\\\midrule
+\code{group} & Gauge-group display name.\\
+\code{lagrangian_scft_candidate} & Combined SCFT-candidate flag.\\
 \code{flavor_symmetry} & Flavor-factor metadata.\\
-\code{conformal_manifold_dimension} & Number of marginal gauge couplings.\\\bottomrule
+\code{conformal_manifold_dimension} & Number of marginal gauge couplings.\\
+\code{exactly_marginal_gauge_couplings} & Gauge-factor IDs.\\
+\code{central_charges} & Exact rational $a,c$ only.\\\bottomrule
 \end{tabularx}
-The public single-property wrappers return the corresponding exact Sage object
-or tuple before aggregate string serialization. The additional keys include
-\code{group}, \code{lagrangian_scft_candidate} and
-\code{exactly_marginal_gauge_couplings}.
+For valid non-candidates, flavor metadata remains available; central charges
+and conformal-manifold dimension are \code{None}, with no marginal gauge
+couplings. Malformed input raises an error. The basic calculator is descriptive;
+the database additionally rejects a theory that fails anomaly or conformality
+checks before inserting its theory data.
+
+\clearpage
+\subsubsection{Separate index-related properties}
+\code{calculate_n2_theory_indices(data, order=18, max_dimension=90)} validates
+once, then computes the full index, the gauge-degree Coulomb index and the
+complete spectrum. Full order $N$ and Coulomb dimension $D$ are independent,
+inclusive cutoffs. Omitting either argument uses the corresponding module
+default. Valid non-candidates receive \code{None} for all five fields.
+\begin{tabularx}{\textwidth}{@{}Y>{\raggedright\arraybackslash}p{59mm}@{}}
+\toprule Index-related key & Representation\\\midrule
+\code{superconformal_index} & Serialized flat Laurent polynomial string.\\
+\code{superconformal_index_order} & Nonnegative integer $N$; default 18.\\
+\code{coulomb_branch_index} & Serialized $x$-series expression string.\\
+\code{coulomb_branch_index_max_dimension} & Exact nonnegative rational $D$; default 90.\\
+\code{coulomb_branch_spectrum} & Sorted tuple of exact \code{Fraction} dimensions,
+with multiplicities; independent of $N,D$.\\\bottomrule
+\end{tabularx}
+The individual \code{calculate_superconformal_index(data, order=...)} and
+\code{calculate_coulomb_branch_index(data, max_dimension=...)} wrappers retain
+raw Sage results. \code{calculate_coulomb_branch_spectrum(data)} returns the
+complete tuple. The calculator does not write to MySQL or decide whether a
+stored result should be replaced; the database API applies that policy.
+
+The property CLI defaults to basic properties. Select the second stage with
+\code{--indices}, optionally \code{--index-order} and
+\code{--coulomb-max-dimension}; supplying cutoffs without \code{--indices}
+is rejected. \code{calculate_n2_theory_properties_from_file} also stays basic.
 
 \clearpage
 \subsection{Shared exact arithmetic, FORM execution and JSON}
@@ -1215,17 +1236,18 @@ The JSON helpers encode a fraction as
 {"numerator": 6, "denominator": 5}
 \end{lstlisting}
 Tuples become arrays, dataclass records become structured objects, and the
-aggregate property layer serializes Sage indices as expression strings. For
+separate index-property layer serializes Sage indices as expression strings. For
 example, the spectrum $(2,3)$ is stored as an array of the two exact fractions,
 not as the polynomial $x^2+x^3$.
 
-Current index strings do not embed their trusted truncation order. Future
-non-Lagrangian imports should carry cutoff/provenance alongside the expression
-before any PL extraction or equality comparison; no such schema extension is
-claimed to exist in this edition.
+Index strings do not embed their trusted truncation order. The separate
+calculator returns it explicitly, and MySQL schema 7 stores the two cutoffs
+beside the expressions and in combined JSON. The last nonzero term is not a
+substitute for this metadata. Future non-Lagrangian imports still need their
+own validated input/provenance workflow; that importer is not implemented.
 
 \clearpage
-\subsection{MySQL persistence and schema version 6}\label{sec:db}
+\subsection{MySQL persistence and schema version 7}\label{sec:db}
 \file{common/n2_theory_db.py}
 The database distinguishes a theory, its shared properties, and its realizations.
 Flavor factors belong to the theory; gauge factors, hypermultiplets and exactly
@@ -1305,20 +1327,20 @@ numerator/denominator records or separate numeric columns, as detailed below.
 \toprule Table & Keys and stored data\\\midrule
 \code{schema_metadata} &
 PK \code{metadata_key}; \code{metadata_value} holds the schema version
-(current value \code{"6"}). Independent of theory rows.\\[3pt]
+(current value \code{"7"}). Independent of theory rows.\\[3pt]
 \code{theories} &
 PK \code{id}; UQ \code{canonical_key}. Display name and creation/update
 timestamps. A new Lagrangian theory uses \code{lagrangian:<hash>} as its key.\\[3pt]
 \code{theory_properties} &
 PK/FK \code{theory_id} $\to$ \code{theories.id}. Flavor group/rank/dimension,
 conformal-manifold dimension, exact central-charge JSON, separate full-index,
-Coulomb-index and Coulomb-spectrum JSON, and combined \code{properties_json}.
+Coulomb-index and Coulomb-spectrum JSON, two nullable cutoff columns, and combined \code{properties_json}.
 Generated, indexed \code{DECIMAL(65,30)} columns approximate $a,c$ for queries.\\[3pt]
 \code{flavor_symmetry_factors} &
 PK \code{id}; FK \code{theory_id} $\to$ \code{theories.id};
 UQ (\code{theory_id}, \code{factor_order}). Group, Lie algebra/rank/dimension,
 representation reality, \code{half_hyper_units}, and
-\code{gauge_representation_json}. No full/half split columns in schema 6.\\[3pt]
+\code{gauge_representation_json}. No full/half split columns since schema 6.\\[3pt]
 \code{lagrangian_realizations} &
 PK \code{id}; FK \code{theory_id} $\to$ \code{theories.id};
 UQ \code{canonical_hash} (64-character SHA-256). Gauge group/count, anomaly and
@@ -1349,7 +1371,9 @@ as text; that key has no additional FK to \code{gauge_factors}.\\\bottomrule
 \subsubsection{Serialization and integrity boundaries}
 Full and Coulomb indices are JSON expression strings. Coulomb spectra are
 arrays of exact fractions; central charges are exact $a,c$ fraction records.
-The separate JSON fields are repeated in \code{properties_json}. Gauge beta
+The separate computed fields and their cutoffs are mirrored into
+\code{properties_json} when filled. Initial imports leave computed columns
+NULL and omit those keys from the basic JSON. Gauge beta
 fractions and representation invariants use \code{DECIMAL(65,0)} integer
 columns. The writer keeps both ends of each matter--gauge relation within the
 same realization; the two individual FKs do not themselves enforce that match.
@@ -1387,30 +1411,37 @@ $4\to5$ & Add nullable \code{coulomb_branch_spectrum_json} for actual generator
 dimensions; do not compute spectra for existing rows.\\
 $5\to6$ & Drop \code{full_hypermultiplets} and \code{half_hypermultiplets}
 from \code{flavor_symmetry_factors}; keep \code{half_hyper_units} and the
-original realization records.\\\bottomrule
+original realization records.\\
+$6\to7$ & Add nullable full-index order and exact Coulomb-cutoff JSON;
+preserve existing results and leave unrecorded legacy precision unknown.\\\bottomrule
 \end{tabularx}
 
 \begin{note}{Schema upgrade and data migration are different operations}
-Version 6 does not rehash existing realizations, merge duplicate theories, or
+The schema-6 and schema-7 migrations do not rehash realizations, merge duplicate theories, or
 eagerly rewrite old shared JSON. Old hashes from the earlier conjugacy or
 full/half conventions require a separate data migration. Under the current
 conjugacy convention, inputs already written entirely as full hypers keep their
 hashes after full/half normalization.
 \end{note}
 
-\code{_insert_shared_properties} ignores the obsolete flavor split when comparing
-legacy JSON. Matching JSON is rewritten without that split; a missing Coulomb
-spectrum can also be backfilled. Physical property mismatches still raise an
-error. Shared flavor metadata retains gauge labels and factor IDs, so this is
-not a general comparison of arbitrary dual realizations.
+\code{_insert_shared_properties} compares only basic physical properties,
+ignoring the obsolete flavor split in legacy JSON. Matching JSON is normalized
+without erasing existing index data. Spectrum filling now belongs to the
+separate worker. Physical mismatches still reject attachment; shared flavor
+metadata includes gauge labels and factor IDs, so this is not a general
+comparison of arbitrary dual realizations.
 
 \code{store_lagrangian_theory} checks anomalies/conformality and calculates
-properties before looking up the hash. A duplicate returns the existing IDs
-with \code{inserted=False}, without updating the realization or calling the
-shared-property helper; it therefore does not trigger legacy-JSON cleanup or
-spectrum backfill. A new import uses parameterized SQL with commit/rollback.
-Schema initialization precedes that DML transaction; MySQL DDL is not covered by
-its rollback. No live database was changed for this documentation update.
+basic properties before looking up the hash. It performs no index or spectrum
+calculation. A duplicate returns the existing IDs with \code{inserted=False}
+and does not change the name, \code{updated_at}, realization or shared data.
+A new import uses parameterized SQL and one explicit data transaction.
+Schema initialization precedes that transaction. There is no automatic
+recognition of dual descriptions; attachment with \code{theory_id} still
+requires matching basic shared properties.
+
+\clearpage
+\input{property_database_workflow.tex}
 
 \clearpage
 \section{Package \texttt{test} and reproducible use}\label{sec:test}
@@ -1425,10 +1456,13 @@ singlets, low-order reference indices, LiE parsing and cache concurrency.\\
 \code{test_n2_theory_coulomb_branches.py} & Weyl degrees, repeated/fractional
 dimensions, PE/PL round trips, relations, full-index projection and precision.\\
 \code{test_n2_theory_properties.py} & Flavor blocks, central charges, property
-keys, direct gauge-based Coulomb wiring and exact JSON.\\
+separation, cutoff metadata, direct Coulomb wiring and exact JSON.\\
 \code{test_n2_theory_db.py} & Schema/version handling, shared property comparison,
-full/half deduplication, legacy JSON/spectrum backfill, SQL parameters and
+full/half deduplication, preservation of existing indices, SQL parameters and
 transactions; actual index equality through $t^6$.\\
+\code{test_n2_theory_db_indices.py} & Deferred worker, schema-7 migration,
+independent precision, legacy metadata, concurrent updates, partial retries,
+rollback, JSON-null selection and real index storage.\\
 \code{test_form_expansion_cache.py} & Exact term serialization, raw-program keys,
 thread/process safety, failure behavior and index integration.\\
 \code{test_cached_decomposition_planning.py} & Reuse of cached composite blocks,
@@ -1438,14 +1472,19 @@ calls, parallel batches, resume and CLI contracts.\\\bottomrule
 \end{tabularx}}
 
 \subsection{Validation snapshot}
-The 10 September 2026 documentation-time rerun of the complete suite finished in
-19.658 s: \textbf{209 tests run, 207 passed, 2 skipped}. Backend tests use actual
-Sage, FORM and LiE. The two skips require live MySQL; schema migrations and
-inserts are otherwise exercised by recording/mocked connections. The index
-chapter records exactness comparisons, controlled cache benchmarks and the
-limits of the observed speedups. Earlier 134- and 170-test counts describe prior
-snapshots and are superseded for the current checkout.
+The two-stage database implementation was validated on 12 September 2026:
+\textbf{238 tests passed in 21.920 s, with no skips}. The run used actual
+Sage/FORM/LiE and a disposable MySQL 8.0.46 server. Migration, race protection,
+rollback, partial retries and real stored indices were exercised without
+altering the user's database. This is recorded implementation evidence; the
+present PDF edit rebuilds and visually checks documents, not the test suite.
 
+The 10 September cache-documentation rerun was 209 tests in 19.658 s:
+207 passed and two MySQL tests were skipped. Earlier 134- and 170-test figures
+also describe older snapshots. Keep those dated measurements distinct from
+the current 238-test validation; cache benchmarks were not rerun here.
+
+\clearpage
 \subsection{Commands and dependencies}
 Run from the repository root with Sage's Python, not an unrelated Python
 interpreter. FORM and LiE must be discoverable for backend tests.
@@ -1455,6 +1494,7 @@ sage -python -m index.n2_theory_index --help
 sage -python -m index.char_decomposition_cache --help
 sage -python -m common.n2_theory_properties --help
 sage -python -m common.n2_theory_db --help
+sage -python -m common.n2_theory_db_indices --help
 \end{lstlisting}
 Sage supplies exact rings and Lie data; FORM and LiE handle expansions and
 representation decompositions. PyMySQL supplies the database connection. The

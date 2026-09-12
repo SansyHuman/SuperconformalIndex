@@ -2,10 +2,23 @@
 <ui version="4.0">
  <class>SettingsDialog</class>
  <widget class="QDialog" name="SettingsDialog">
-  <property name="geometry"><rect><x>0</x><y>0</y><width>800</width><height>600</height></rect></property>
+  <property name="geometry"><rect><x>0</x><y>0</y><width>800</width><height>740</height></rect></property>
   <property name="windowTitle"><string>Settings — N2SCFTDB</string></property>
   <layout class="QVBoxLayout" name="dialogLayout">
    <property name="spacing"><number>16</number></property>
+   <item>
+    <widget class="QGroupBox" name="indexGroup">
+     <property name="title"><string>Index truncation</string></property>
+     <layout class="QFormLayout" name="indexLayout">
+      <property name="fieldGrowthPolicy"><enum>QFormLayout::AllNonFixedFieldsGrow</enum></property>
+      <item row="0" column="0"><widget class="QLabel" name="fullIndexOrderLabel"><property name="text"><string>Full superconformal index order</string></property><property name="buddy"><cstring>fullIndexOrderSpin</cstring></property></widget></item>
+      <item row="0" column="1"><widget class="QSpinBox" name="fullIndexOrderSpin"><property name="toolTip"><string>Highest included power of t. Enter a nonnegative integer.</string></property><property name="minimum"><number>0</number></property><property name="maximum"><number>2147483647</number></property><property name="value"><number>18</number></property></widget></item>
+      <item row="1" column="0"><widget class="QLabel" name="coulombMaxDimensionLabel"><property name="text"><string>Coulomb index maximum dimension</string></property><property name="buddy"><cstring>coulombMaxDimensionEdit</cstring></property></widget></item>
+      <item row="1" column="1"><widget class="QLineEdit" name="coulombMaxDimensionEdit"><property name="toolTip"><string>Highest included scaling dimension. Enter a nonnegative integer or exact fraction, such as 90 or 6/5.</string></property><property name="text"><string>90</string></property><property name="placeholderText"><string>Integer or fraction, e.g. 90 or 6/5</string></property></widget></item>
+      <item row="2" column="0" colspan="2"><widget class="QLabel" name="indexCutoffHint"><property name="text"><string>Both cutoffs are inclusive: power of t for the full index, scaling dimension for the Coulomb index.</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
+     </layout>
+    </widget>
+   </item>
    <item>
     <widget class="QGroupBox" name="cacheGroup">
      <property name="title"><string>Cache databases</string></property>
@@ -59,6 +72,7 @@
   </layout>
  </widget>
  <tabstops>
+  <tabstop>fullIndexOrderSpin</tabstop><tabstop>coulombMaxDimensionEdit</tabstop>
   <tabstop>characterCacheEdit</tabstop><tabstop>characterCacheBrowse</tabstop>
   <tabstop>formCacheEdit</tabstop><tabstop>formCacheBrowse</tabstop>
   <tabstop>databaseEdit</tabstop><tabstop>hostEdit</tabstop><tabstop>portSpin</tabstop>

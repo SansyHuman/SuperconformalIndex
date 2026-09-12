@@ -64,11 +64,13 @@ another computer does not copy its password; restore the keyring entry or remove
 `mysql/password_id` from the INI and enter the password again.
 
 Defaults mirror `index/char_decomposition_cache.py`,
-`index/form_expansion_cache.py`, `index/n2_theory_index.py`, and
-`common/n2_theory_db.py`:
+`index/form_expansion_cache.py`, `index/n2_theory_index.py`,
+`common/n2_theory_db.py`, and `common/n2_theory_properties.py`:
 
 | Setting | First-run default |
 | --- | --- |
+| Full superconformal index maximum order | `18` (power of `t`, `INDEX_MAX_ORDER`) |
+| Coulomb index maximum dimension | `90` (`C_INDEX_MAX_ORDER`) |
 | Character decomposition cache | Project-root `char_decomposition_cache.db` |
 | FORM expansion cache | Project-root `form_expansion_cache.db` |
 | MySQL database | Empty; the backend requires an explicitly supplied name |
@@ -80,6 +82,15 @@ Defaults mirror `index/char_decomposition_cache.py`,
 | LiE executable | `lie` (resolved through PATH) |
 | FORM executable | `form` (resolved through PATH) |
 | LiE / FORM timeout | `600` seconds per invocation |
+
+The **Index truncation** section saves both inclusive cutoffs. Full-index order
+is a nonnegative integer; the Coulomb cutoff accepts nonnegative integers or
+exact fractions such as `6/5`. Coulomb dimensions are saved as exact strings
+(fractions are reduced), without conversion to floating point. Older settings
+files use the project defaults for these new fields until saved.
+`N2DatabaseWindow.settings` exposes them as `index/full_max_order` and
+`index/coulomb_max_dimension`, suitable for the backend's `order` and
+`max_dimension` arguments respectively.
 
 Cache paths can select existing files or future files. Relative cache paths
 are resolved against the project root when saved. Both cache locations are

@@ -1,0 +1,152 @@
+% Shared property/database workflow, inspected 12 September 2026.
+% New displays are unnumbered to preserve the mathematical equation sequence.
+\subsection{Independent precision and replacement rules}
+The database stores one set of physical properties per theory. A Lagrangian
+realization supplies the input for later calculation; different realizations
+attached to the same theory share its indices and Coulomb spectrum.
+Initial imports run the anomaly/conformality checks and calculate basic
+properties only. Both indices, the spectrum and both precision columns start
+as SQL \code{NULL}; their keys are initially absent from \code{properties_json}.
+
+The separate calculator returns full-index precision $N\in\mathbb Z_{\geq0}$
+and Coulomb precision $D\in\mathbb Q_{\geq0}$. These are inclusive cutoffs:
+\[
+ \mathcal I_{\leq N}=\sum_{a=0}^{N}t^a P_a(y,u),\qquad
+ \mathcal I_{\mathrm C,\leq D}=\sum_{0\leq\Delta\leq D}c_\Delta x^\Delta.
+\]
+A zero boundary coefficient does not reduce the trusted cutoff. For example,
+$1+x^2+x^4$ computed through $D=5$ must retain precision five, even though its
+largest nonzero exponent is four. The complete gauge-invariant generator
+spectrum is independent of either cutoff; it is not truncated with the index.
+
+For each of the two indices separately, let $V$ be its stored value and
+$p_{\rm old},p_{\rm new}$ its stored and submitted cutoffs. The write rule is
+\[
+ \text{replace or fill}\quad\Longleftrightarrow\quad
+ V\text{ is missing}\quad\text{or}\quad
+ \bigl(p_{\rm old}\text{ is known and }p_{\rm new}>p_{\rm old}\bigr).
+\]
+\begin{tabularx}{\textwidth}{@{}p{50mm}Y@{}}
+\toprule Stored / submitted state & Database action\\\midrule
+Stored index missing & Fill it and record the supplied cutoff.\\
+Known, strictly higher cutoff & Replace that index and its cutoff.\\
+Equal or lower cutoff & Keep the existing string and precision unchanged.\\
+Legacy index, unknown cutoff & Keep it; report \code{unknown_precision}.\\
+Omitted or \code{None} component & Leave the corresponding stored data alone.\\
+Supplied index without a cutoff & Reject the payload before opening the write transaction.\\\bottomrule
+\end{tabularx}
+For example, an update from $(N,D)=(18,90)$ to $(24,60)$ upgrades the full index
+only. The Coulomb index remains at dimension 90. Equal-order submissions do
+not replace even a different string; this API is not a correction/force-update
+mechanism. The caller supplies the trusted calculation cutoff; the writer does
+not infer or prove precision from the expression's last monomial.
+
+A missing spectrum is filled. An identical complete spectrum is retained, with
+multiplicities preserved; a conflicting spectrum raises an error and rolls back
+that update call. This policy differs from comparison of truncated indices.
+
+{\small\textbf{Implementation source:} \code{common/n2_theory_properties.py},
+\code{common/n2_theory_db.py}; the inequalities above express the implemented
+cutoff contract, not an additional physical conjecture.}
+
+\clearpage
+\subsection{Schema 7, legacy data and atomic writes}
+Schema 7 keeps the same ten tables and adds two nullable columns to
+\code{theory_properties}. Central charges and all existing index data are
+preserved by the migration.
+\begin{tabularx}{\textwidth}{@{}Y>{\raggedright\arraybackslash}p{57mm}@{}}
+\toprule Column / result key & Stored representation\\\midrule
+\code{superconformal_index_order} & \texttt{BIGINT UNSIGNED}; inclusive integer $N$.\\
+\code{coulomb_branch_index_max_dimension_json} & Exact numerator/denominator JSON for $D$.\\
+\code{coulomb_branch_index_max_dimension} & Corresponding key in calculator output and combined JSON.\\\bottomrule
+\end{tabularx}
+The three computed values still use \code{superconformal_index_json},
+\code{coulomb_branch_index_json} and \code{coulomb_branch_spectrum_json}.
+Successful updates mirror changed values and cutoffs into \code{properties_json}
+while preserving basic properties and other computed components.
+
+Migration $6\to7$ adds the columns without guessing legacy cutoffs, recomputing
+indices, rehashing realizations or merging theories. Initialization applies
+migrations when the database is next opened through the database API. MySQL
+schema DDL precedes the explicit data transaction and is not rolled back with it.
+
+When an old result's original requested cutoff is independently known, record
+it before normal upgrades:
+\begin{lstlisting}[language=Python]
+from common.n2_theory_db import record_lagrangian_index_cutoffs
+
+# Use these numbers only if they are the verified original cutoffs.
+record_lagrangian_index_cutoffs(
+    connection, realization_id, order=18, max_dimension=90,
+)
+\end{lstlisting}
+This function fills unknown precision only. It rejects changing an already
+known cutoff or annotating an index that is absent. It changes neither index
+expression. Merely seeing a last term of degree 18 does not establish that the
+original calculation was requested through 18.
+
+\code{update_lagrangian_indices(connection, realization_id, indices)} accepts
+\code{calculate_n2_theory_indices}'s output or a subset of computed components
+with their matching cutoffs. It opens a short transaction, locks the shared
+row with \texttt{SELECT ... FOR UPDATE}, rechecks the current cutoffs, and merges
+accepted changes into the columns and JSON together. Failure rolls back the
+call; a no-op does not change the theory's \code{updated_at} timestamp.
+
+Calculations run before this lock is acquired. Thus a slower low-order worker
+cannot overwrite a higher-order result committed while it was calculating.
+Use an initialized connection with no caller-owned transaction for update and
+legacy-cutoff APIs. These APIs manage their own commit/rollback boundary.
+
+\clearpage
+\subsection{Separate worker, partial retries and reproducible use}
+The program \code{common/n2_theory_db_indices.py} streams stored Lagrangian
+inputs in bounded pages, using the smallest realization ID for each theory.
+It visits each shared theory once rather than recalculating the same shared
+properties for every attached realization.
+\begin{enumerate}
+\item Default mode selects any missing full index, Coulomb index or spectrum.
+SQL \code{NULL} and JSON \code{null} are both treated as missing.
+\item \code{--upgrade} additionally selects indices with known lower cutoffs.
+Already sufficient components are not calculated. Complete legacy records with
+unknown precision are reported without recalculating those indices.
+\item Each requested component is calculated outside a database transaction,
+then submitted to the locked update API. The stored state is checked again at
+write time, even if it differed when the job was selected.
+\item Each successful component commits independently. A failure is reported
+for that component; subsequent components and theories continue. Re-running
+retries remaining missing or lower-order components and keeps earlier successes.
+\end{enumerate}
+Multiple workers can duplicate a calculation; there is no persistent job-claim
+queue. The row-lock and cutoff policy protects data against downgrades, not
+against duplicated CPU work. A conflicting spectrum rolls back its own update
+call, not components already saved by earlier worker calls.
+
+Run from the repository root with Sage's Python. Database credentials follow
+the existing \code{N2_DB_HOST}, \code{N2_DB_USER}, \code{N2_DB_PASSWORD} and
+\code{N2_DB_UNIX_SOCKET} environment conventions; port is a CLI option.
+\begin{lstlisting}[language=bash]
+# Stage 1: validate and store basic properties.
+sage -python -m common.n2_theory_db \
+  anomalies/example_e6.json DATABASE --user USER
+# Stage 2: fill missing components, defaults N=18 and D=90.
+sage -python -m common.n2_theory_db_indices DATABASE --user USER
+# Later: upgrade only components with lower known precision.
+sage -python -m common.n2_theory_db_indices DATABASE --user USER \
+  --upgrade --index-order 24 --coulomb-max-dimension 100 --limit 10
+\end{lstlisting}
+The worker also accepts \code{--host}, \code{--port}, \code{--unix-socket},
+\code{--connect-timeout}, \code{--cache-directory}, \code{--lie-executable},
+\code{--form-executable}, \code{--timeout} and \code{--processes}.
+\code{--limit} bounds visited theory jobs, including reported legacy skips.
+The API \code{fill_lagrangian_indices} yields the same per-theory outcomes.
+Each outcome reports \code{updated_fields}, \code{skipped_fields} and
+\code{errors}; a final CLI summary counts processed and failed jobs. Exit codes
+are 0 for no component failures, 1 for component failures, and 2 for an outer
+configuration or database-level error.
+
+\textbf{Validation recorded during implementation, 12 September 2026.}
+All 238 backend tests passed in 21.920 seconds, including an isolated MySQL
+8.0.46 server, schema migration, concurrent upgrades, rollback, partial retries,
+JSON-null selection and real Sage/FORM/LiE calculations. This PDF update checks
+source contracts and document rendering; it does not rerun that suite or alter
+the user's database. Older cache-performance measurements remain dated evidence.

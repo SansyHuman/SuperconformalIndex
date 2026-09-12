@@ -1,6 +1,29 @@
 # N2SCFTDB Project Handoff
 
-Last updated: **2026-09-11 (Asia/Seoul)**.
+Last updated: **2026-09-12 (Asia/Seoul)**.
+
+## Two-stage database workflow (12 September 2026)
+
+`calculate_n2_theory_properties` and database imports now calculate/store only
+anomaly-checked basic properties. Index and Coulomb-spectrum work is explicit
+and separate. `common/n2_theory_db_indices.py` fills missing components, or
+upgrades known lower cutoffs with `--upgrade`. Successful components commit
+individually; failures are reported and can be retried.
+
+MySQL schema 7 adds nullable full-index and exact Coulomb cutoff metadata.
+Updates lock and recheck the shared theory row, compare the two cutoffs
+independently, and preserve equal/lower-order inputs and legacy indices whose
+precision is unknown. `record_lagrangian_index_cutoffs` can record verified
+original cutoffs for legacy results before upgrades. No precision is inferred
+from the largest nonzero term. See the current MySQL section below for usage.
+The existing user database has not been migrated during this implementation;
+validation used a separate temporary MySQL 8.0.46 instance. The full backend
+suite passed all **238 tests in 21.920 seconds**, including live MySQL migration,
+concurrent upgrades, rollback, partial retries, and real FORM/LiE calculations.
+The test command was `sage -python -B -m unittest discover -s test -v`, with
+`N2_TEST_MYSQL_DATABASE` and `N2_TEST_MYSQL_UNIX_SOCKET` pointing exclusively to
+the disposable test instance, `DOT_SAGE=/tmp/codex-sage-cache`, and bytecode
+generation disabled. The GUI was not changed or retested in this update.
 
 ## Project rename and GUI update (11 September 2026)
 
@@ -25,8 +48,10 @@ passes all 20 GUI regressions, including relocation and external-cache-path chec
 The rebuilt PDFs retain 34 and 20 pages, with body text unchanged apart from
 project branding and no unresolved references or overfull boxes.
 
-The remaining implementation narrative and measured results below describe
-the explicitly dated 10 September snapshot; renaming does not rerun benchmarks.
+The property and MySQL sections below describe the current two-stage workflow.
+Older implementation narratives, benchmarks, and PDF descriptions retain their
+explicitly dated snapshots; the later PDF update described under Documentation revises the property/database
+chapters while retaining dated benchmarks.
 
 ## Where this session stopped
 
@@ -391,7 +416,7 @@ single-factor results to the existing simple enumerator.
 
 File: `common/n2_theory_properties.py`
 
-`calculate_n2_theory_properties(data)` returns a dictionary containing:
+`calculate_n2_theory_properties(data)` returns only basic properties:
 
 ```python
 {
@@ -401,16 +426,23 @@ File: `common/n2_theory_properties.py`
     "conformal_manifold_dimension": ...,
     "exactly_marginal_gauge_couplings": ...,
     "central_charges": ...,
-    "coulomb_branch_index": ...,
-    "coulomb_branch_spectrum": ...,
-    "superconformal_index": ...,
 }
 ```
 
-The key is singular: `superconformal_index`. Both index values are serialized
-strings for SCFT candidates. `coulomb_branch_spectrum` is a sorted tuple of
-`Fraction` dimensions, with repetitions preserved. Central charges, both
-indices, and the spectrum are `None` for non-SCFT candidates.
+`calculate_n2_theory_indices(data, order=18, max_dimension=90)` separately
+returns `superconformal_index`, `coulomb_branch_index`, and
+`coulomb_branch_spectrum`, plus `superconformal_index_order` and
+`coulomb_branch_index_max_dimension`. The cutoffs are inclusive; full-index
+order is an integer t power, while the Coulomb cutoff is an exact rational
+scaling dimension. Store these requested cutoffs even when boundary terms
+vanish. The complete spectrum is independent of either cutoff.
+
+Both index values are serialized strings. The spectrum is a sorted tuple of
+`Fraction` dimensions with repetitions preserved. For non-SCFT candidates,
+the five index-related fields are None; basic central charges and conformal
+manifold dimension are also None. The basic call never calculates indices or
+spectra. Its CLI defaults to basic properties; `--indices` selects the second
+stage and accepts `--index-order` and `--coulomb-max-dimension`.
 
 ### Flavor symmetry
 
@@ -469,7 +501,7 @@ dimension 90 by passing the parsed gauge factors to
 
 The user's `_calculate_coulomb_branch_spectrum(anomaly_result)` obtains Weyl
 invariant degrees from the same gauge factors and converts them to `Fraction`.
-It is now called by `calculate_n2_theory_properties`. Public convenience APIs
+It is called by `calculate_n2_theory_indices`, separately from basic properties. Public convenience APIs
 include `calculate_central_charges`, `calculate_superconformal_index`,
 `calculate_coulomb_branch_index`, and `calculate_coulomb_branch_spectrum`.
 
@@ -953,7 +985,7 @@ Verified examples from the session:
 
 File: `common/n2_theory_db.py`
 
-The database uses the default PyMySQL client. The current schema version is 6.
+The database uses the default PyMySQL client. The current schema version is 7.
 The tables are:
 
 - `schema_metadata`
@@ -993,18 +1025,65 @@ The original split remains in the realization's `hypermultiplets` rows and
 input/anomaly JSON. This schema migration does not rehash or merge existing
 realizations, or eagerly rewrite their shared JSON.
 
-`_insert_shared_properties` backfills the spectrum column and combined JSON if
-the existing JSON matches the new properties except for the missing spectrum
-key or the obsolete full/half flavor split. It removes the split before
-comparison and rewrites matching legacy JSON to the current shape. It still
-rejects physical property mismatches, including different half-hyper units.
+Migration 6 to 7 adds `superconformal_index_order BIGINT UNSIGNED NULL` and
+`coulomb_branch_index_max_dimension_json JSON NULL`. Existing results are
+preserved and legacy cutoffs remain unknown (NULL). Initialization applies
+migrations automatically when the database is next opened through the API.
 
-**Backfill limitation:** `store_lagrangian_theory` returns early for an already
-stored realization, before calling `_insert_shared_properties`. Simply
-reimporting the identical realization therefore does not trigger this backfill.
-The earlier conversational statement that every repeated store backfills older
-rows was too broad. A dedicated backfill or a change to the duplicate path would
-be future work; neither was implemented during this handoff update.
+New imports put SQL NULL in all three index/spectrum columns and both cutoff
+columns; their combined JSON initially contains only basic properties.
+`_insert_shared_properties` compares only basic physical properties, normalizes
+obsolete full/half flavor metadata, and preserves existing index data when
+attaching another compatible realization. Different central charges or matter
+multiplicities still reject the attachment.
+
+`update_lagrangian_indices(connection, realization_id, indices)` accepts the
+separate calculator's dictionary or a partial result with the matching cutoff.
+It locks the shared row and updates the dedicated columns and combined JSON
+atomically. Full and Coulomb cutoffs are compared independently. Missing data
+is filled; a known strictly higher cutoff replaces its index; equal or lower
+cutoffs keep the stored value. None/omitted fields do not erase data. Spectra
+are complete rather than truncated: missing spectra are filled, identical
+spectra are retained, and conflicting spectra reject the transaction.
+
+Legacy indices with no recorded precision are retained. When their original
+requested cutoffs are known, record them explicitly before upgrading:
+
+```python
+record_lagrangian_index_cutoffs(connection, realization_id, order=18, max_dimension=90)
+```
+
+Only use values verified from the original calculation. This API fills unknown
+cutoffs; it cannot change an already known cutoff or annotate a missing index.
+The highest nonzero monomial is not a reliable precision estimate.
+
+### Separate index worker
+
+`common/n2_theory_db_indices.py` streams bounded pages of stored Lagrangian
+inputs, visiting one realization per shared theory. Its default mode fills any
+missing full index, Coulomb index, or spectrum. `--upgrade` additionally
+calculates components with known lower cutoffs. Complete legacy records with
+unknown precision are reported without recalculating their indices.
+
+Calculations happen outside database transactions. Each successful component
+is saved independently, so partial failures retain completed work. Re-running
+resumes from remaining missing/lower-order components. Competing workers may
+duplicate a calculation, but row locking prevents a lower/equal-order result
+from replacing one committed by another worker. This is not a job-claim queue.
+
+```bash
+# Run from the project root using Sage's Python; password uses N2_DB_PASSWORD.
+sage -python common/n2_theory_db_indices.py database_name --user database_user
+sage -python common/n2_theory_db_indices.py database_name --user database_user \
+  --upgrade --index-order 24 --coulomb-max-dimension 100 --limit 10
+```
+
+The worker accepts host/port/socket options, `--cache-directory`, executable
+paths, `--timeout`, and `--processes`. It emits JSON outcomes and a summary;
+exit 0 means no component errors, 1 means component failures, and 2 means a
+configuration/database-level error. `fill_lagrangian_indices` exposes the same
+workflow as a generator. API connections must have an initialized schema and
+no caller-owned transaction before starting index updates.
 
 ### Duplicate behavior
 
@@ -1055,17 +1134,16 @@ need a separate data migration. Shared flavor metadata additionally contains
 gauge representations and factor IDs, which must be considered when supporting
 different realizations of one theory.
 
-Anomaly checking and property calculation, including the index, currently
-happen before the duplicate lookup. Consequently, importing an existing
-realization still incurs those calculations. The database path also performs
+Anomaly checking and basic property calculation happen before the duplicate
+lookup. Importing an existing realization incurs no index or spectrum work. The database path also performs
 anomaly parsing twice: once in `_checked_results` and again in
 `calculate_n2_theory_properties`.
 
 Different dual Lagrangian descriptions are not recognized automatically. Use
 `theory_id` or `--theory-id` to attach a different realization to an existing
-theory. Its shared properties must match the existing `properties_json`
-exactly, apart from the missing-spectrum backfill case described above;
-otherwise the insertion is rolled back.
+theory. Its basic shared properties must match the existing record; index
+availability or precision does not affect that comparison. A physical mismatch
+rolls back the insertion.
 
 New data insertion uses one explicit InnoDB transaction. A failure rolls back
 the theory-related DML, although schema initialization and migration occur
@@ -1146,6 +1224,24 @@ The test database name must contain `test`.
 
 ## Documentation
 
+### Property and database PDF revision (12 September 2026)
+
+Both canonical PDFs now describe the separate basic/index-property APIs,
+schema 7, the deferred worker, independent cutoff comparisons, unknown legacy
+precision, atomic writes, and component-level retries. They include worker CLI
+examples and the previously recorded 238-test result. This PDF edit did not
+rerun those tests or benchmarks.
+
+The rebuilt implementation reference has **39 pages**; the index guide has
+**24 pages**. Every page was rendered and visually reviewed, with changed pages
+also checked at reading size. There are no unresolved references/citations or
+overfull boxes. All 48 reference and 15 guide authored equation/align blocks
+remain verbatim; original guide pages 2-4 retain their embedded text. The new
+`output/pdf/property_database_workflow.tex` is a shared source required by both
+builds. `output/pdf/BUILD.md` records the current sources and verification.
+
+### Retained documentation history
+
 - `anomalies/README.md`
 - `index/n2_theory_index_Mathematical_Background.pdf`
 - `output/pdf/n2_implementation_reference_summary.pdf`
@@ -1153,6 +1249,7 @@ The test database name must contain `test`.
 - `output/pdf/n2_theory_index_Mathematical_Background.tex`
 - `output/pdf/cache_session_algorithms.tex`
 - `output/pdf/cache_session_validation.tex`
+- `output/pdf/property_database_workflow.tex`
 - `output/pdf/source_assets/n2_background_preserved_pages_2_to_4.pdf`
 - `output/pdf/BUILD.md`
 
@@ -1166,7 +1263,7 @@ relationships, primary/unique keys, shared versus realization ownership,
 full/half normalization, and migration/backfill limitations. It also records the
 134-test validation result as a dated historical snapshot.
 
-The latest 10 September update documents the committed FORM expansion cache,
+The earlier 10 September update documents the committed FORM expansion cache,
 exact raw-program keys and serialization, concurrent access, cross-theory hits,
 weighted-order cached-factor planning, the complete builder API/CLI, order
 barriers, resume semantics and the `floor(N/2)` cutoff proof. Controlled FORM
@@ -1183,7 +1280,7 @@ mathematical equation numbers remain stable. Unrelated anomaly, Coulomb,
 Higgs-design and MySQL sections retain their explicitly dated content.
 
 `output/pdf/BUILD.md` records reproducible build and visual-review commands.
-Both canonical outputs were rebuilt and visually checked: 34 pages for the
+At that earlier revision, both outputs were rebuilt and checked: 34 pages for the
 implementation reference and 20 for the index guide. Final logs have no
 unresolved citations/references or overfull boxes. Original numbered equations
 remain unchanged; 23 original reference pages retain identical body text, and

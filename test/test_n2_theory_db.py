@@ -297,7 +297,7 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
                 if legacy_split:
                     stored["flavor_symmetry"] = deepcopy(full["flavor_symmetry"])
                 if missing_spectrum:
-                    stored.pop("coulomb_branch_spectrum")
+                    stored.pop("coulomb_branch_spectrum", None)
                 encoded = database._json_text(stored)
                 connection = _RecordingConnection(select_rows=[{
                     "properties_json": encoded if json_string else json.loads(encoded)
@@ -307,10 +307,10 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
                     params for sql, params in connection.statements
                     if sql.startswith("UPDATE theory_properties")
                 ]
-                self.assertEqual(len(updates), int(legacy_split or missing_spectrum))
+                self.assertEqual(len(updates), int(legacy_split))
                 if updates:
                     expected = json.loads(database._json_text(database._shared_properties(half)))
-                    self.assertEqual(json.loads(updates[0][1]), expected)
+                    self.assertEqual(json.loads(updates[0][0]), expected)
 
     def test_shared_properties_still_reject_physical_mismatches(self):
         _, properties = database._checked_results(_pseudoreal_matter(("half", 8)))
@@ -431,7 +431,7 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
             for statement, parameters in connection.statements
             if "INSERT INTO schema_metadata" in statement
         )
-        self.assertEqual(metadata_parameters, ("schema_version", "6"))
+        self.assertEqual(metadata_parameters, ("schema_version", "7"))
 
     def test_initialize_database_migrates_version_one_schema(self):
         connection = _RecordingConnection(
@@ -462,6 +462,7 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
                 ("4", "schema_version"),
                 ("5", "schema_version"),
                 ("6", "schema_version"),
+                ("7", "schema_version"),
             ],
         )
 
@@ -546,12 +547,12 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
             statement for statement, _ in connection.statements
             if statement.startswith("ALTER TABLE")
         ]
-        self.assertEqual(len(migrations), 1)
+        self.assertEqual(len(migrations), 2)
         self.assertIn("ALTER TABLE flavor_symmetry_factors", migrations[0])
         self.assertIn("DROP COLUMN full_hypermultiplets", migrations[0])
         self.assertIn("DROP COLUMN half_hypermultiplets", migrations[0])
         self.assertNotIn("half_hyper_units", migrations[0])
-        self.assertEqual(connection.statements[-1][1], ("6", "schema_version"))
+        self.assertEqual(connection.statements[-1][1], ("7", "schema_version"))
 
     def test_connect_database_uses_pymysql_options(self):
         connection = MagicMock()
@@ -677,32 +678,19 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
         self.assertEqual(len(connection.statements), 1)
         self.assertTrue(connection.statements[0][0].startswith("SELECT"))
 
-    def test_existing_properties_without_spectrum_are_backfilled(self):
+    def test_basic_import_preserves_existing_indices_and_missing_spectrum(self):
         _, properties = database._checked_results(E6_SCFT)
-        legacy_shared = database._shared_properties(properties)
-        legacy_shared.pop("coulomb_branch_spectrum")
-        connection = _RecordingConnection(
-            select_rows=[
-                {"properties_json": database._json_text(legacy_shared)}
-            ]
-        )
-
-        database._insert_shared_properties(
-            connection, theory_id=3, properties=properties
-        )
-
-        self.assertEqual(len(connection.statements), 2)
-        update, parameters = connection.statements[1]
-        self.assertTrue(update.startswith("UPDATE theory_properties"))
-        self.assertEqual(json.loads(parameters[0]), [
-            {"numerator": 2, "denominator": 1},
-            {"numerator": 5, "denominator": 1},
-            {"numerator": 6, "denominator": 1},
-            {"numerator": 8, "denominator": 1},
-            {"numerator": 9, "denominator": 1},
-            {"numerator": 12, "denominator": 1},
-        ])
-        self.assertEqual(parameters[2], 3)
+        stored = database._shared_properties(properties)
+        stored.update({
+            "superconformal_index": "existing index",
+            "superconformal_index_order": 24,
+            "coulomb_branch_index": "existing Coulomb index",
+        })
+        connection = _RecordingConnection(select_rows=[{
+            "properties_json": database._json_text(stored),
+        }])
+        database._insert_shared_properties(connection, theory_id=3, properties=properties)
+        self.assertEqual(len(connection.statements), 1)
 
     def test_shared_properties_store_exact_central_charge_fractions(self):
         _, properties = database._checked_results(E6_SCFT)
@@ -722,31 +710,21 @@ class TheoryDatabaseUnitTests(unittest.TestCase):
             "c": {"numerator": 22, "denominator": 1},
         }
         self.assertEqual(json.loads(parameters[5]), expected)
-        self.assertEqual(json.loads(parameters[6]), "mock_coulomb_index")
-        expected_spectrum = [
-            {"numerator": 2, "denominator": 1},
-            {"numerator": 5, "denominator": 1},
-            {"numerator": 6, "denominator": 1},
-            {"numerator": 8, "denominator": 1},
-            {"numerator": 9, "denominator": 1},
-            {"numerator": 12, "denominator": 1},
-        ]
-        self.assertEqual(json.loads(parameters[7]), expected_spectrum)
-        self.assertEqual(json.loads(parameters[8]), "mock_index")
+        self.assertEqual(parameters[6:9], (None, None, None))
         shared_properties = json.loads(parameters[9])
-        self.assertEqual(
-            shared_properties["central_charges"], expected
-        )
-        self.assertEqual(
-            shared_properties["superconformal_index"], "mock_index"
-        )
-        self.assertEqual(
-            shared_properties["coulomb_branch_index"], "mock_coulomb_index"
-        )
-        self.assertEqual(
-            shared_properties["coulomb_branch_spectrum"], expected_spectrum
-        )
-        self.assertNotIn("superconformal_indices", shared_properties)
+        self.assertEqual(shared_properties["central_charges"], expected)
+        for key in ("superconformal_index", "coulomb_branch_index", "coulomb_branch_spectrum"):
+            self.assertNotIn(key, shared_properties)
+
+    def test_insertion_checks_never_call_index_or_spectrum_backends(self):
+        with patch.object(theory_properties, "calculate_index_internal") as full, \
+             patch.object(theory_properties, "calculate_lagrangian_coulomb_branch_index") as coulomb, \
+             patch.object(theory_properties, "coulomb_branch_spectrum_from_gauge_factors") as spectrum:
+            database._checked_results(E6_SCFT)
+        full.assert_not_called()
+        coulomb.assert_not_called()
+        spectrum.assert_not_called()
+
 
     def test_store_commits_successful_transaction(self):
         connection = MagicMock()
@@ -848,8 +826,15 @@ class TheoryDatabaseBackendTests(unittest.TestCase):
                         database._canonical_hash(checked_full),
                         database._canonical_hash(checked_half),
                     )
-                    self.assertIsNotNone(full["superconformal_index"])
-                    self.assertIsNotNone(full["coulomb_branch_index"])
+                    full_indices = theory_properties.calculate_n2_theory_indices(
+                        _pseudoreal_matter(("full", number), product=product)
+                    )
+                    half_indices = theory_properties.calculate_n2_theory_indices(
+                        _pseudoreal_matter(("half", 2 * number), product=product)
+                    )
+                    self.assertIsNotNone(full_indices["superconformal_index"])
+                    self.assertIsNotNone(full_indices["coulomb_branch_index"])
+                    self.assertEqual(full_indices, half_indices)
                     self.assertEqual(
                         database._shared_properties(full),
                         database._shared_properties(half),

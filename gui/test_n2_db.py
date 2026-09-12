@@ -87,6 +87,18 @@ class GuiTests(unittest.TestCase):
             self.assertEqual(values[f"mysql/{field}"], mysql[field])
         for field in ("lie_executable", "form_executable", "timeout"):
             self.assertEqual(values[f"tools/{field}"], index[field])
+        tree = ast.parse((PROJECT_ROOT / "common/n2_theory_properties.py").read_text())
+        cutoffs = {
+            node.targets[0].id: ast.literal_eval(node.value)
+            for node in tree.body if isinstance(node, ast.Assign)
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id in ("INDEX_MAX_ORDER", "C_INDEX_MAX_ORDER")
+        }
+        self.assertEqual(values["index/full_max_order"], cutoffs["INDEX_MAX_ORDER"])
+        self.assertEqual(values["index/coulomb_max_dimension"], str(cutoffs["C_INDEX_MAX_ORDER"]))
+        dialog = self.dialog()
+        self.assertEqual(dialog.fullIndexOrderSpin.value(), cutoffs["INDEX_MAX_ORDER"])
+        self.assertEqual(dialog.coulombMaxDimensionEdit.text(), str(cutoffs["C_INDEX_MAX_ORDER"]))
         self.assertEqual(values["mysql/database"], "")
         for key, module, constant in (
             ("cache/character_database", "char_decomposition_cache", "DEFAULT_CHAR_CACHE_DATABASE"),
@@ -128,6 +140,7 @@ class GuiTests(unittest.TestCase):
         values = {
             "cache/character_database": str(Path(self.temp.name) / "캐시 chars.db"),
             "cache/form_database": str(Path(self.temp.name) / "FORM cache.db"),
+            "index/full_max_order": 24, "index/coulomb_max_dimension": "101/3",
             "mysql/database": "landscape_test", "mysql/host": "db.example.invalid",
             "mysql/port": 3307, "mysql/user": "researcher",
             "mysql/password": " fake secret = ; # 한글 ", "mysql/connect_timeout": 17,
@@ -183,9 +196,47 @@ window.close()
         dialog = self.dialog()
         dialog.databaseEdit.setText("discard_me")
         dialog.passwordEdit.setText("also discarded")
+        dialog.fullIndexOrderSpin.setValue(30)
+        dialog.coulombMaxDimensionEdit.setText("120")
         dialog.buttonBox.button(QtWidgets.QDialogButtonBox.StandardButton.Cancel).click()
         self.assertEqual(self.store.path.read_bytes(), original)
         self.assertEqual(self.store.load()["mysql/database"], "")
+
+    def test_legacy_settings_use_default_cutoffs_without_rewriting(self):
+        legacy = QtCore.QSettings(str(self.store.path), QtCore.QSettings.Format.IniFormat)
+        legacy.setValue("mysql/database", "existing_database")
+        legacy.setValue("mysql/password_id", "")
+        legacy.sync()
+        before = self.store.path.read_bytes()
+        dialog = self.dialog()
+        self.assertEqual(dialog.databaseEdit.text(), "existing_database")
+        self.assertEqual(dialog.fullIndexOrderSpin.value(), 18)
+        self.assertEqual(dialog.coulombMaxDimensionEdit.text(), "90")
+        dialog.reject()
+        self.assertEqual(self.store.path.read_bytes(), before)
+
+    def test_coulomb_cutoff_validation_and_exact_saving(self):
+        self.store.save(default_settings())
+        before = self.store.path.read_bytes()
+        dialog = self.dialog()
+        for invalid in ("", "-1", "1/0", "1.5", "nan", "1+2"):
+            with self.subTest(invalid=invalid):
+                dialog.coulombMaxDimensionEdit.setText(invalid)
+                with patch.object(QtWidgets.QMessageBox, "warning") as warning:
+                    dialog.accept()
+                warning.assert_called_once()
+                self.assertNotEqual(dialog.result(), QtWidgets.QDialog.DialogCode.Accepted)
+                self.assertEqual(self.store.path.read_bytes(), before)
+        for entered, expected in (("0", "0"), (" 12/10 ", "6/5"),
+                                  ("9007199254740993/2", "9007199254740993/2")):
+            with self.subTest(entered=entered):
+                dialog = self.dialog()
+                dialog.fullIndexOrderSpin.setValue(0)
+                dialog.coulombMaxDimensionEdit.setText(entered)
+                dialog.accept()
+                saved = self.store.load()
+                self.assertEqual(saved["index/full_max_order"], 0)
+                self.assertEqual(saved["index/coulomb_max_dimension"], expected)
 
     def test_environment_defaults_and_saved_values_take_precedence(self):
         with patch.dict(os.environ, {

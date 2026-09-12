@@ -1,9 +1,10 @@
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from fractions import Fraction
 from io import StringIO
 import json
 from pathlib import Path
 import sys
+from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
@@ -209,17 +210,11 @@ class TheoryPropertyTests(unittest.TestCase):
                 "c": {"numerator": 22, "denominator": 1},
             },
         )
-        self.assertEqual(
-            result["coulomb_branch_spectrum"],
-            [
-                {"numerator": 2, "denominator": 1},
-                {"numerator": 5, "denominator": 1},
-                {"numerator": 6, "denominator": 1},
-                {"numerator": 8, "denominator": 1},
-                {"numerator": 9, "denominator": 1},
-                {"numerator": 12, "denominator": 1},
-            ],
-        )
+        self.assertNotIn("coulomb_branch_spectrum", result)
+        self.assertNotIn("coulomb_branch_index", result)
+        self.assertNotIn("superconformal_index", result)
+        self.calculate_index_internal.assert_not_called()
+        self.calculate_lagrangian_coulomb_branch_index.assert_not_called()
 
     def test_public_central_charge_api_counts_half_hypers(self):
         central_charges = properties.calculate_central_charges(
@@ -284,7 +279,7 @@ class TheoryPropertyTests(unittest.TestCase):
             ],
         }
 
-        result = properties.calculate_n2_theory_properties(data)
+        result = properties.calculate_n2_theory_indices(data)
 
         self.assertEqual(result["coulomb_branch_index"], "mock_coulomb_index")
         self.assertEqual(
@@ -293,6 +288,8 @@ class TheoryPropertyTests(unittest.TestCase):
         )
         self.assertEqual(result["superconformal_index"], "mock_index")
         self.assertNotIn("superconformal_indices", result)
+        self.assertEqual(result["superconformal_index_order"], 18)
+        self.assertEqual(result["coulomb_branch_index_max_dimension"], Fraction(90))
         self.calculate_index_internal.assert_called_once()
 
     def test_public_superconformal_index_uses_internal_calculation(self):
@@ -307,6 +304,180 @@ class TheoryPropertyTests(unittest.TestCase):
 
         self.assertEqual(result, "mock_index")
         self.calculate_index_internal.assert_called_once()
+
+
+    def test_basic_properties_never_calculate_indices_or_spectrum(self):
+        data = {
+            "algebra": "A1",
+            "hypermultiplets": [{"representation": "fundamental", "number": 4}],
+        }
+        with patch.object(
+            properties, "coulomb_branch_spectrum_from_gauge_factors",
+            side_effect=AssertionError("basic properties must not compute the spectrum"),
+        ):
+            result = properties.calculate_n2_theory_properties(data)
+        self.assertTrue(result["lagrangian_scft_candidate"])
+        self.assertEqual(result["central_charges"], {
+            "a": Fraction(23, 24), "c": Fraction(7, 6),
+        })
+        self.assertEqual(set(result), {
+            "group", "lagrangian_scft_candidate", "flavor_symmetry",
+            "conformal_manifold_dimension", "exactly_marginal_gauge_couplings",
+            "central_charges",
+        })
+        self.calculate_index_internal.assert_not_called()
+        self.calculate_lagrangian_coulomb_branch_index.assert_not_called()
+
+    def test_indices_validate_once_and_preserve_requested_cutoffs(self):
+        data = {
+            "algebra": "A2",
+            "hypermultiplets": [{"representation": "fundamental", "number": 6}],
+        }
+        self.calculate_index_internal.return_value = "1"
+        self.calculate_lagrangian_coulomb_branch_index.return_value = "1"
+        with patch.object(
+            properties, "check_input_data", wraps=properties.check_input_data,
+        ) as check, patch.object(
+            properties, "_calculate_flavor_symmetry",
+            side_effect=AssertionError("indices must not calculate basic properties"),
+        ), patch.object(
+            properties, "_calculate_central_charges",
+            side_effect=AssertionError("indices must not calculate basic properties"),
+        ):
+            result = properties.calculate_n2_theory_indices(
+                data, order=1, max_dimension=Fraction(3, 2),
+            )
+        check.assert_called_once_with(data)
+        self.assertEqual(result, {
+            "superconformal_index": "1", "superconformal_index_order": 1,
+            "coulomb_branch_index": "1",
+            "coulomb_branch_index_max_dimension": Fraction(3, 2),
+            "coulomb_branch_spectrum": (Fraction(2), Fraction(3)),
+        })
+        self.assertEqual(self.calculate_index_internal.call_args.args[2], 1)
+        self.assertEqual(
+            self.calculate_lagrangian_coulomb_branch_index.call_args.args[1],
+            Fraction(3, 2),
+        )
+
+    def test_public_indices_accept_independent_cutoffs(self):
+        data = {
+            "algebra": "A1",
+            "hypermultiplets": [{"representation": "fundamental", "number": 4}],
+        }
+        full_index = properties.calculate_superconformal_index(data, order=24)
+        coulomb_index = properties.calculate_coulomb_branch_index(
+            data, max_dimension="101/2",
+        )
+        self.assertEqual(full_index, "mock_index")
+        self.assertEqual(coulomb_index, "mock_coulomb_index")
+        self.assertEqual(self.calculate_index_internal.call_args.args[2], 24)
+        self.assertEqual(
+            self.calculate_lagrangian_coulomb_branch_index.call_args.args[1],
+            Fraction(101, 2),
+        )
+
+    def test_non_scft_indices_are_uncomputed(self):
+        for number in (1, 2):  # An anomalous half hyper, then anomaly-free non-SCFT.
+            data = {
+                "algebra": "A1",
+                "hypermultiplets": [{
+                    "representation": "fundamental", "kind": "half", "number": number,
+                }],
+            }
+            with self.subTest(number=number), patch.object(
+                properties, "coulomb_branch_spectrum_from_gauge_factors",
+                side_effect=AssertionError("non-SCFT must not compute the spectrum"),
+            ):
+                result = properties.calculate_n2_theory_indices(data)
+                self.assertEqual(len(result), 5)
+                self.assertTrue(all(value is None for value in result.values()))
+                self.assertIsNone(properties.calculate_superconformal_index(data))
+                self.assertIsNone(properties.calculate_coulomb_branch_index(data))
+                self.assertIsNone(properties.calculate_coulomb_branch_spectrum(data))
+        self.calculate_index_internal.assert_not_called()
+        self.calculate_lagrangian_coulomb_branch_index.assert_not_called()
+
+    def test_invalid_cutoffs_are_rejected_before_index_work(self):
+        data = {
+            "algebra": "A1",
+            "hypermultiplets": [{"representation": "fundamental", "number": 4}],
+        }
+        for order in (-1, True, 2.0, Fraction(3, 2)):
+            with self.subTest(order=order), self.assertRaisesRegex(ValueError, "order"):
+                properties.calculate_n2_theory_indices(data, order=order)
+        for maximum in (-1, True, 2.0, "1/0"):
+            with self.subTest(maximum=maximum), self.assertRaisesRegex(
+                ValueError, "max_dimension",
+            ):
+                properties.calculate_n2_theory_indices(data, max_dimension=maximum)
+        self.calculate_index_internal.assert_not_called()
+        self.calculate_lagrangian_coulomb_branch_index.assert_not_called()
+
+    def test_invalid_theory_is_rejected_by_indices(self):
+        with self.assertRaisesRegex(ValueError, "invalid theory input"):
+            properties.calculate_n2_theory_indices({
+                "algebra": "B3",
+                "hypermultiplets": [{"representation": "vector", "kind": "half"}],
+            })
+        self.calculate_index_internal.assert_not_called()
+        self.calculate_lagrangian_coulomb_branch_index.assert_not_called()
+
+    def test_main_indices_serializes_cutoffs_and_complete_spectrum(self):
+        path = PROJECT_ROOT / "anomalies" / "example_e6.json"
+        output = StringIO()
+        with redirect_stdout(output):
+            exit_code = properties.main([
+                str(path), "--indices", "--index-order", "0",
+                "--coulomb-max-dimension", "3/2",
+            ])
+        result = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertNotIn("central_charges", result)
+        self.assertEqual(result["superconformal_index_order"], 0)
+        self.assertEqual(result["coulomb_branch_index_max_dimension"], {
+            "numerator": 3, "denominator": 2,
+        })
+        self.assertEqual(result["coulomb_branch_spectrum"], [
+            {"numerator": dimension, "denominator": 1}
+            for dimension in (2, 5, 6, 8, 9, 12)
+        ])
+
+    def test_main_rejects_cutoffs_without_indices(self):
+        with redirect_stderr(StringIO()), self.assertRaises(SystemExit) as error:
+            properties.main(["unused.json", "--index-order", "6"])
+        self.assertEqual(error.exception.code, 2)
+
+
+class TheoryIndexIntegrationTests(unittest.TestCase):
+    def test_real_indices_at_two_orders_with_isolated_caches(self):
+        from index.n2_theory_index import parse_index_polynomial
+
+        data = {
+            "algebra": "A1",
+            "hypermultiplets": [{"representation": "fundamental", "number": 4}],
+        }
+        with TemporaryDirectory() as directory, patch.multiple(
+            properties, INDEX_CACHE_DIRECTORY=Path(directory), DEFAULT_PROCESS_COUNT=1,
+        ):
+            lower = properties.calculate_n2_theory_indices(
+                data, order=0, max_dimension=0,
+            )
+            higher = properties.calculate_n2_theory_indices(
+                data, order=4, max_dimension=5,
+            )
+        self.assertEqual(lower["superconformal_index"], "1")
+        self.assertEqual(lower["coulomb_branch_index"], "1")
+        self.assertEqual(lower["superconformal_index_order"], 0)
+        self.assertEqual(lower["coulomb_branch_index_max_dimension"], Fraction(0))
+        self.assertEqual(
+            parse_index_polynomial(higher["superconformal_index"]),
+            parse_index_polynomial("1 + 28*t^4/u^2 + t^4*u^4"),
+        )
+        self.assertEqual(higher["superconformal_index_order"], 4)
+        self.assertEqual(higher["coulomb_branch_index"], "1 + x^2 + x^4")
+        self.assertEqual(higher["coulomb_branch_index_max_dimension"], Fraction(5))
+        self.assertEqual(higher["coulomb_branch_spectrum"], (Fraction(2),))
 
 
 if __name__ == "__main__":

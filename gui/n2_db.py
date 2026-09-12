@@ -10,6 +10,11 @@ import uuid
 
 from PyQt6 import QtCore, QtWidgets, uic
 
+if not __package__:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from common.number_utils import as_nonnegative_fraction
+
 if __package__:
     from .password_store import PasswordStorageError, PasswordVault
 else:
@@ -24,12 +29,16 @@ def default_settings() -> dict[str, str | int | float]:
     """Mirror backend defaults without importing Sage or opening any database.
 
     Sources: index/{char_decomposition_cache,form_expansion_cache,n2_theory_index}
-    and common/n2_theory_db.py. Environment overrides match the MySQL CLI.
+    and common/{n2_theory_db,n2_theory_properties}.py.
+    Environment overrides match the MySQL CLI.
     A database name is required by that API and has no project default.
     """
     return {
         "cache/character_database": str(PROJECT_ROOT / "char_decomposition_cache.db"),
         "cache/form_database": str(PROJECT_ROOT / "form_expansion_cache.db"),
+        "index/full_max_order": 18,
+        # Exact text is accepted by the backend, including rational dimensions.
+        "index/coulomb_max_dimension": "90",
         "mysql/database": "",
         "mysql/host": os.environ.get("N2_DB_HOST", "127.0.0.1"),
         "mysql/port": 3306,
@@ -166,6 +175,7 @@ class SettingsDialog(QtWidgets.QDialog):
         self.text_fields = {
             "cache/character_database": self.characterCacheEdit,
             "cache/form_database": self.formCacheEdit,
+            "index/coulomb_max_dimension": self.coulombMaxDimensionEdit,
             "mysql/database": self.databaseEdit,
             "mysql/host": self.hostEdit,
             "mysql/user": self.userEdit,
@@ -174,6 +184,7 @@ class SettingsDialog(QtWidgets.QDialog):
             "tools/form_executable": self.formEdit,
         }
         self.number_fields = {
+            "index/full_max_order": self.fullIndexOrderSpin,
             "mysql/port": self.portSpin,
             "mysql/connect_timeout": self.connectTimeoutSpin,
             "tools/timeout": self.timeoutSpin,
@@ -215,6 +226,18 @@ class SettingsDialog(QtWidgets.QDialog):
     def accept(self) -> None:
         values = {key: field.text() for key, field in self.text_fields.items()}
         values.update({key: field.value() for key, field in self.number_fields.items()})
+        try:
+            values["index/coulomb_max_dimension"] = str(as_nonnegative_fraction(
+                values["index/coulomb_max_dimension"], "Coulomb index maximum dimension"
+            ))
+        except ValueError:
+            QtWidgets.QMessageBox.warning(
+                self, "Invalid Coulomb cutoff",
+                "Enter a nonnegative integer or fraction, such as 90 or 6/5.",
+            )
+            self.coulombMaxDimensionEdit.setFocus()
+            self.coulombMaxDimensionEdit.selectAll()
+            return
         required = (
             "cache/character_database", "cache/form_database", "mysql/host",
             "mysql/user", "tools/lie_executable", "tools/form_executable",

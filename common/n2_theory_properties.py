@@ -2,10 +2,20 @@
 """Calculate shared properties of four-dimensional N=2 Lagrangian theories.
 
 The input JSON schema is the same one accepted by
-``anomalies.check_n2_anomalies``. The implemented properties are the connected
-continuous flavor symmetry at the massless point, the local complex dimension
-of the conformal manifold, the conformal central charges, and the
-superconformal index, Coulomb-branch index, and Coulomb-branch spectrum.
+``anomalies.check_n2_anomalies``. ``calculate_n2_theory_properties`` calculates
+the connected continuous flavor symmetry at the massless point, the local
+complex dimension of the conformal manifold, and the conformal central charges.
+It never calculates indices or the Coulomb spectrum.
+
+``calculate_n2_theory_indices`` is a separate, explicit calculation of the full
+superconformal index, Coulomb-branch index, and Coulomb-branch spectrum. It also
+returns the requested inclusive cutoffs, which must be retained alongside the
+index strings: their highest nonzero powers need not equal their precision.
+Database persistence and replacement of stored results are handled by callers.
+
+The CLI calculates basic properties by default; use ``--indices`` for the
+separate index calculation, optionally with ``--index-order`` and
+``--coulomb-max-dimension``.
 """
 
 from __future__ import annotations
@@ -41,8 +51,10 @@ from index.n2_theory_index import calculate_index_internal
 
 if __package__:
     from .json_utils import json_text
+    from .number_utils import as_nonnegative_fraction, as_nonnegative_int
 else:
     from common.json_utils import json_text
+    from common.number_utils import as_nonnegative_fraction, as_nonnegative_int
 
 RepresentationKey = tuple[tuple[str, DynkinLabels], ...]
 
@@ -325,6 +337,7 @@ def _extract_gauge_factors(
 
 def _calculate_superconformal_index(
     anomaly_result: dict[str, Any],
+    order: int,
 ) -> Any:
     """Calculate the superconformal index."""
     factors = _extract_gauge_factors(anomaly_result)
@@ -332,7 +345,7 @@ def _calculate_superconformal_index(
     return calculate_index_internal(
         factors,
         hypermultiplets,
-        INDEX_MAX_ORDER,
+        order,
         cache_directory=INDEX_CACHE_DIRECTORY,
         lie_executable=LIE_EXECUTABLE,
         form_executable=FORM_EXECUTABLE,
@@ -342,13 +355,14 @@ def _calculate_superconformal_index(
 
 
 def _calculate_coulomb_branch_index(
-    anomaly_result: dict[str, Any]
+    anomaly_result: dict[str, Any],
+    max_dimension: Fraction,
 ) -> Any:
     """Calculate the Coulomb-branch index."""
     factors = _extract_gauge_factors(anomaly_result)
     return calculate_lagrangian_coulomb_branch_index(
         factors,
-        C_INDEX_MAX_ORDER,
+        max_dimension,
         form_executable=FORM_EXECUTABLE,
         timeout=DEFAULT_TIMEOUT,
     )
@@ -375,7 +389,13 @@ def _validated_anomaly_result(data: dict[str, Any]) -> dict[str, Any]:
 
 
 def calculate_n2_theory_properties(data: dict[str, Any]) -> dict[str, Any]:
-    """Calculate implemented properties from an anomaly-checker JSON object."""
+    """Calculate basic properties without any index or Coulomb calculation.
+
+    Index and Coulomb-spectrum keys are omitted. Use
+    :func:`calculate_n2_theory_indices` separately for those results. Invalid
+    input raises ``ValueError``; well-formed non-SCFT input retains its flavor
+    result, with central charges and conformal-manifold dimension set to None.
+    """
     anomaly_result = _validated_anomaly_result(data)
 
     flavor_symmetry = _calculate_flavor_symmetry(anomaly_result)
@@ -390,21 +410,6 @@ def calculate_n2_theory_properties(data: dict[str, Any]) -> dict[str, Any]:
         if anomaly_result["lagrangian_scft_candidate"]
         else None
     )
-    superconformal_index = (
-        str(_calculate_superconformal_index(anomaly_result))
-        if anomaly_result["lagrangian_scft_candidate"]
-        else None
-    )
-    coulomb_branch_index = (
-        str(_calculate_coulomb_branch_index(anomaly_result))
-        if anomaly_result["lagrangian_scft_candidate"]
-        else None
-    )
-    coulomb_branch_spectrum = (
-        _calculate_coulomb_branch_spectrum(anomaly_result)
-        if anomaly_result["lagrangian_scft_candidate"]
-        else None
-    )
     return {
         "group": anomaly_result["group"],
         "lagrangian_scft_candidate": anomaly_result[
@@ -414,16 +419,68 @@ def calculate_n2_theory_properties(data: dict[str, Any]) -> dict[str, Any]:
         "conformal_manifold_dimension": conformal_dimension,
         "exactly_marginal_gauge_couplings": marginal_couplings,
         "central_charges": central_charges,
-        "coulomb_branch_index": coulomb_branch_index,
-        "coulomb_branch_spectrum": coulomb_branch_spectrum,
-        "superconformal_index": superconformal_index,
+    }
+
+
+def calculate_n2_theory_indices(
+    data: dict[str, Any],
+    *,
+    order: Any | None = None,
+    max_dimension: Any | None = None,
+) -> dict[str, Any]:
+    """Calculate index-related properties separately from basic properties.
+
+    ``order`` is the inclusive nonnegative integer cutoff in t (default
+    ``INDEX_MAX_ORDER``, 18). ``max_dimension`` is the inclusive exact rational
+    Coulomb scaling-dimension cutoff (default ``C_INDEX_MAX_ORDER``, 90).
+    The Coulomb spectrum itself is complete, independent of either cutoff.
+
+    Index values are serialized strings; the spectrum is a sorted tuple of
+    exact ``Fraction`` dimensions, retaining multiplicities. The
+    ``superconformal_index_order`` and ``coulomb_branch_index_max_dimension``
+    fields record the actual requested cutoffs, including when the boundary
+    coefficients vanish. Storage code compares these cutoffs independently
+    before replacing either index; this function does no writes
+    to the theory database and does not enforce a stored-result update policy.
+
+    Invalid input raises ``ValueError``. For a well-formed non-SCFT candidate,
+    all five fields are None and no index or spectrum calculation runs.
+    """
+    order = as_nonnegative_int(
+        INDEX_MAX_ORDER if order is None else order, "order"
+    )
+    max_dimension = as_nonnegative_fraction(
+        C_INDEX_MAX_ORDER if max_dimension is None else max_dimension,
+        "max_dimension",
+    )
+    anomaly_result = _validated_anomaly_result(data)
+    if not anomaly_result["lagrangian_scft_candidate"]:
+        return {
+            "superconformal_index": None,
+            "superconformal_index_order": None,
+            "coulomb_branch_index": None,
+            "coulomb_branch_index_max_dimension": None,
+            "coulomb_branch_spectrum": None,
+        }
+    return {
+        "superconformal_index": str(
+            _calculate_superconformal_index(anomaly_result, order)
+        ),
+        "superconformal_index_order": order,
+        "coulomb_branch_index": str(
+            _calculate_coulomb_branch_index(anomaly_result, max_dimension)
+        ),
+        "coulomb_branch_index_max_dimension": max_dimension,
+        "coulomb_branch_spectrum": _calculate_coulomb_branch_spectrum(
+            anomaly_result
+        ),
     }
 
 
 def calculate_n2_theory_properties_from_file(
     path: str | Path,
 ) -> dict[str, Any]:
-    """Load an anomaly-checker JSON file and calculate implemented properties."""
+    """Load a theory JSON file and calculate only its basic properties."""
     with Path(path).open("r", encoding="utf-8") as handle:
         data = json.load(handle)
     return calculate_n2_theory_properties(data)
@@ -439,12 +496,18 @@ def calculate_central_charges(
     return _calculate_central_charges(anomaly_result)
 
 
-def calculate_coulomb_branch_index(data: dict[str, Any]) -> Any:
-    """Calculate the Coulomb-branch index of a Lagrangian SCFT candidate."""
+def calculate_coulomb_branch_index(
+    data: dict[str, Any], *, max_dimension: Any | None = None
+) -> Any:
+    """Calculate the raw Coulomb index through an inclusive dimension cutoff."""
+    max_dimension = as_nonnegative_fraction(
+        C_INDEX_MAX_ORDER if max_dimension is None else max_dimension,
+        "max_dimension",
+    )
     anomaly_result = _validated_anomaly_result(data)
     if not anomaly_result["lagrangian_scft_candidate"]:
         return None
-    return _calculate_coulomb_branch_index(anomaly_result)
+    return _calculate_coulomb_branch_index(anomaly_result, max_dimension)
 
 
 def calculate_coulomb_branch_spectrum(
@@ -457,19 +520,50 @@ def calculate_coulomb_branch_spectrum(
     return _calculate_coulomb_branch_spectrum(anomaly_result)
 
 
-def calculate_superconformal_index(data: dict[str, Any]) -> Any:
+def calculate_superconformal_index(
+    data: dict[str, Any], *, order: Any | None = None
+) -> Any:
+    """Calculate the raw full index through an inclusive integer t cutoff."""
+    order = as_nonnegative_int(
+        INDEX_MAX_ORDER if order is None else order, "order"
+    )
     anomaly_result = _validated_anomaly_result(data)
     if not anomaly_result["lagrangian_scft_candidate"]:
         return None
-    return _calculate_superconformal_index(anomaly_result)
+    return _calculate_superconformal_index(anomaly_result, order)
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", type=Path, help="path to the theory JSON file")
+    parser.add_argument(
+        "--indices", action="store_true",
+        help="calculate only index-related properties",
+    )
+    parser.add_argument(
+        "--index-order", type=int,
+        help="inclusive t cutoff for --indices (default: 18)",
+    )
+    parser.add_argument(
+        "--coulomb-max-dimension",
+        help="inclusive exact Coulomb dimension cutoff for --indices (default: 90)",
+    )
     args = parser.parse_args(argv)
+    if not args.indices and (
+        args.index_order is not None or args.coulomb_max_dimension is not None
+    ):
+        parser.error("index cutoffs require --indices")
     try:
-        result = calculate_n2_theory_properties_from_file(args.input)
+        if args.indices:
+            with args.input.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            result = calculate_n2_theory_indices(
+                data,
+                order=args.index_order,
+                max_dimension=args.coulomb_max_dimension,
+            )
+        else:
+            result = calculate_n2_theory_properties_from_file(args.input)
     except (
         OSError,
         json.JSONDecodeError,
